@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet add *)",
+      "Bash(rm \"D:/Documentos/Projetos/CoreFinance/src/CoreFinance.Domain/Class1.cs\")",
+      "Bash(rm \"D:/Documentos/Projetos/CoreFinance/src/CoreFinance.Application/Class1.cs\")",
+      "Bash(rm \"D:/Documentos/Projetos/CoreFinance/src/CoreFinance.Infra/Class1.cs\")",
+      "Bash(mkdir -p \"D:/Documentos/Projetos/CoreFinance/src/CoreFinance.Domain/Common\" \"D:/Documentos/Projetos/CoreFinance/src/CoreFinance.Domain/Entities\" \"D:/Documentos/Projetos/CoreFinance/src/CoreFinance.Domain/Enums\" \"D:/Documentos/Projetos/CoreFinance/src/CoreFinance.Domain/Interfaces/Repositories\")",
+      "Bash(mkdir -p \"D:/Documentos/Projetos/CoreFinance/src/CoreFinance.Application/Common\" \"D:/Documentos/Projetos/CoreFinance/src/CoreFinance.Application/Interfaces/Services\" \"D:/Documentos/Projetos/CoreFinance/src/CoreFinance.Application/DTOs\" \"D:/Documentos/Projetos/CoreFinance/src/CoreFinance.Application/Validators\")",
+      "Bash(mkdir -p \"D:/Documentos/Projetos/CoreFinance/src/CoreFinance.Infra/Data/Configurations\" \"D:/Documentos/Projetos/CoreFinance/src/CoreFinance.Infra/Data/Migrations\" \"D:/Documentos/Projetos/CoreFinance/src/CoreFinance.Infra/Repositories\")",
+      "Bash(mkdir -p \"D:/Documentos/Projetos/CoreFinance/src/CoreFinance.API/Controllers\" \"D:/Documentos/Projetos/CoreFinance/src/CoreFinance.API/Middlewares\" \"D:/Documentos/Projetos/CoreFinance/src/CoreFinance.API/Extensions\")",
+      "PowerShell(npm *)"
+    ]
+  }
+}
