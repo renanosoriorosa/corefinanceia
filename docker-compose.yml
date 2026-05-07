@@ -1,0 +1,27 @@
+services:
+  api:
+    build:
+      context: ./src
+      dockerfile: Dockerfile
+    container_name: corefinance-api
+    ports:
+      - "5176:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ConnectionStrings__DefaultConnection: "user=sa;pwd=SQLServerDocker@;Data Source=host.docker.internal,1433;Initial Catalog=CoreFinance;MultipleActiveResultSets=True;Application Name=EF-CORE;TrustServerCertificate=True;"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: corefinance-web
+    ports:
+      - "3000:3000"
+    environment:
+      API_URL: http://api:8080
+    depends_on:
+      - api
+    restart: unless-stopped
