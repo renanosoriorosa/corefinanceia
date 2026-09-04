@@ -32,6 +32,18 @@ public class PaymentConfiguration : IEntityTypeConfiguration<Payment>
         builder.Property(x => x.CreatedAt)
             .IsRequired();
 
+        builder.Property(x => x.UserId)
+            .IsRequired();
+
+        builder.HasIndex(x => x.UserId);
+
+        // NoAction evita o erro de múltiplos caminhos de cascata no SQL Server
+        // (Users -> FixedAccounts -> Payments já é um caminho).
+        builder.HasOne<User>()
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.NoAction);
+
         builder.HasOne(x => x.FixedAccount)
             .WithMany()
             .HasForeignKey(x => x.FixedAccountId)

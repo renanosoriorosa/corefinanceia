@@ -1,4 +1,5 @@
 using System.Reflection;
+using Microsoft.OpenApi;
 
 namespace CoreFinance.API.Extensions;
 
@@ -19,6 +20,24 @@ public static class SwaggerExtensions
             var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
             var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
             options.IncludeXmlComments(xmlPath);
+
+            options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+            {
+                Name = "Authorization",
+                Type = SecuritySchemeType.Http,
+                Scheme = "bearer",
+                BearerFormat = "JWT",
+                In = ParameterLocation.Header,
+                Description = "Informe apenas o token JWT retornado no login."
+            });
+
+            options.AddSecurityRequirement(documento => new OpenApiSecurityRequirement
+            {
+                {
+                    new OpenApiSecuritySchemeReference("Bearer", documento),
+                    new List<string>()
+                }
+            });
 
             options.TagActionsBy(api => [api.GroupName ?? api.ActionDescriptor.RouteValues["controller"]!]);
             options.DocInclusionPredicate((_, _) => true);

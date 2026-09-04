@@ -10,9 +10,15 @@ async function proxy(req: NextRequest, params: Params): Promise<NextResponse> {
 
   const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
 
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const authorization = req.headers.get('authorization');
+  if (authorization) {
+    headers.Authorization = authorization;
+  }
+
   const response = await fetch(targetUrl, {
     method: req.method,
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: hasBody ? await req.text() : undefined,
   });
 

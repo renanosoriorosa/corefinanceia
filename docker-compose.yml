@@ -9,6 +9,10 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__DefaultConnection: "user=sa;pwd=SQLServerDocker@;Data Source=host.docker.internal,1433;Initial Catalog=CoreFinance;MultipleActiveResultSets=True;Application Name=EF-CORE;TrustServerCertificate=True;"
+      Jwt__Key: "corefinance-chave-de-desenvolvimento-com-mais-de-32-caracteres"
+      Jwt__Issuer: "CoreFinance"
+      Jwt__Audience: "CoreFinance"
+      Jwt__ExpiraEmMinutos: "480"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

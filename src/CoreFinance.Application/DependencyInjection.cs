@@ -1,3 +1,5 @@
+using CoreFinance.Application.Auth.Interfaces;
+using CoreFinance.Application.Auth.Services;
 using CoreFinance.Application.Dashboard.Interfaces;
 using CoreFinance.Application.Dashboard.Services;
 using CoreFinance.Application.FixedAccounts.Interfaces;
@@ -21,6 +23,7 @@ public static class DependencyInjection
         services.AddScoped<IPaymentService, PaymentService>();
         services.AddScoped<IPainelService, PainelService>();
         services.AddScoped<IDashboardService, DashboardService>();
+        services.AddScoped<IAuthService, AuthService>();
 
         return services;
     }

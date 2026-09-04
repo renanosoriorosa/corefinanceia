@@ -2,7 +2,7 @@ using CoreFinance.Domain.Common;
 
 namespace CoreFinance.Domain.Entities;
 
-public class FixedAccount : BaseEntity
+public class FixedAccount : OwnedEntity
 {
     public string Name { get; private set; } = null!;
     public string? Description { get; private set; }

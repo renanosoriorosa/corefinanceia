@@ -27,5 +27,15 @@ public class FixedAccountConfiguration : IEntityTypeConfiguration<FixedAccount>
 
         builder.Property(x => x.CreatedAt)
             .IsRequired();
+
+        builder.Property(x => x.UserId)
+            .IsRequired();
+
+        builder.HasIndex(x => x.UserId);
+
+        builder.HasOne<User>()
+            .WithMany()
+            .HasForeignKey(x => x.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

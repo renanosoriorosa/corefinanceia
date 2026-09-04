@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useAuth } from '@/hooks/useAuth';
 
 const itens = [
   { href: '/', label: 'Painel do Mês', icone: 'bi-calendar2-check' },
@@ -12,6 +13,13 @@ const itens = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { usuario, sair } = useAuth();
+
+  function encerrarSessao() {
+    sair();
+    router.replace('/login');
+  }
 
   return (
     <nav
@@ -45,6 +53,24 @@ export default function Sidebar() {
           );
         })}
       </ul>
+
+      <div className="mt-auto px-3 pt-3 border-top border-secondary">
+        <div className="text-white small text-truncate" title={usuario?.email}>
+          <i className="bi bi-person-circle me-2 text-secondary" />
+          {usuario?.nome}
+        </div>
+        <div className="text-secondary text-truncate mb-2" style={{ fontSize: '0.75rem' }}>
+          {usuario?.email}
+        </div>
+        <button
+          type="button"
+          className="btn btn-sm btn-outline-secondary w-100 d-flex align-items-center justify-content-center gap-2"
+          onClick={encerrarSessao}
+        >
+          <i className="bi bi-box-arrow-right" />
+          Sair
+        </button>
+      </div>
     </nav>
   );
 }

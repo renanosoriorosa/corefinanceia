@@ -10,15 +10,18 @@ namespace CoreFinance.Application.Payments.Services;
 public class PaymentService : IPaymentService
 {
     private readonly IPaymentRepository _repository;
+    private readonly IFixedAccountRepository _fixedAccountRepository;
     private readonly IValidator<CreatePaymentRequest> _createValidator;
     private readonly IValidator<UpdatePaymentRequest> _updateValidator;
 
     public PaymentService(
         IPaymentRepository repository,
+        IFixedAccountRepository fixedAccountRepository,
         IValidator<CreatePaymentRequest> createValidator,
         IValidator<UpdatePaymentRequest> updateValidator)
     {
         _repository = repository;
+        _fixedAccountRepository = fixedAccountRepository;
         _createValidator = createValidator;
         _updateValidator = updateValidator;
     }
@@ -50,6 +53,9 @@ public class PaymentService : IPaymentService
         if (!validacao.IsValid)
             return Result<PaymentDto>.Fail(validacao.Errors[0].ErrorMessage);
 
+        if (!await ContaFixaValidaAsync(request.FixedAccountId))
+            return Result<PaymentDto>.Fail("Conta fixa não encontrada.");
+
         var pagamento = new Payment(
             request.Description,
             request.Amount,
@@ -74,6 +80,9 @@ public class PaymentService : IPaymentService
         var pagamento = await _repository.ObterPorIdAsync(id);
         if (pagamento is null)
             return Result<PaymentDto>.Fail("Pagamento não encontrado.");
+
+        if (!await ContaFixaValidaAsync(request.FixedAccountId))
+            return Result<PaymentDto>.Fail("Conta fixa não encontrada.");
 
         pagamento.Update(
             request.Description,
@@ -100,6 +109,18 @@ public class PaymentService : IPaymentService
         await _repository.SalvarAsync();
 
         return Result.Ok();
+    }
+
+    /// <summary>
+    /// Garante que a conta fixa informada existe e pertence ao usuário logado
+    /// (o repositório já enxerga apenas os registros do dono).
+    /// </summary>
+    private async Task<bool> ContaFixaValidaAsync(Guid? contaFixaId)
+    {
+        if (!contaFixaId.HasValue)
+            return true;
+
+        return await _fixedAccountRepository.ObterPorIdAsync(contaFixaId.Value) is not null;
     }
 
     private static PaymentDto ToDto(Payment p) => new()

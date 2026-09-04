@@ -28,8 +28,16 @@ Infra
 
 ## Tabelas
 
+### Users
+- Id
+- Name
+- Email (único)
+- PasswordHash
+- Active
+
 ### FixedAccounts
 - Id
+- UserId
 - Name
 - Description
 - IsRequiredMonthly
@@ -37,6 +45,7 @@ Infra
 
 ### Payments
 - Id
+- UserId
 - FixedAccountId nullable
 - Description
 - Amount
@@ -69,6 +78,16 @@ web/
 - Cards elegantes
 - Sidebar simples
 - Dark mode
+
+---
+
+# Multiusuário
+
+- Autenticação com JWT (Bearer)
+- Toda entidade do usuário herda de OwnedEntity (UserId)
+- O isolamento é feito por global query filter no AppDbContext
+- O UserId é preenchido automaticamente no SaveChangesAsync
+- Services e repositories nunca filtram por usuário manualmente
 
 ---
 

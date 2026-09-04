@@ -39,6 +39,22 @@ O sistema deve possuir foco em:
 
 # Funcionalidades
 
+## 0. Autenticação e Multiusuário
+
+O acesso ao sistema exige conta própria.
+
+### Telas
+- Login
+- Criar conta
+
+### Regras
+- senha armazenada com hash (BCrypt)
+- token JWT com validade configurável
+- cada usuário enxerga somente os próprios dados
+- rotas da API protegidas por padrão
+
+---
+
 ## 1. Cadastro de Contas Fixas
 
 O usuário pode cadastrar contas fixas.
@@ -209,8 +225,6 @@ Responsável por:
 ---
 
 # Futuras melhorias
-- autenticação
-- multiusuário
 - exportação PDF
 - metas financeiras
 - notificações
