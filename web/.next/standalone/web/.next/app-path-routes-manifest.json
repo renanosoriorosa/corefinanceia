@@ -1,8 +1,0 @@
-{
-  "/api/[...path]/route": "/api/[...path]",
-  "/_not-found/page": "/_not-found",
-  "/dashboard/page": "/dashboard",
-  "/contas-fixas/page": "/contas-fixas",
-  "/pagamentos/page": "/pagamentos",
-  "/page": "/"
-}

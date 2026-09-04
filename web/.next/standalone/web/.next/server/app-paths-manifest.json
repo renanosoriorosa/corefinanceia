@@ -1,8 +1,0 @@
-{
-  "/api/[...path]/route": "app/api/[...path]/route.js",
-  "/_not-found/page": "app/_not-found/page.js",
-  "/dashboard/page": "app/dashboard/page.js",
-  "/contas-fixas/page": "app/contas-fixas/page.js",
-  "/pagamentos/page": "app/pagamentos/page.js",
-  "/page": "app/page.js"
-}

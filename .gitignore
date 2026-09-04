@@ -396,3 +396,8 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# Next.js
+.next/
+out/
+*.tsbuildinfo
