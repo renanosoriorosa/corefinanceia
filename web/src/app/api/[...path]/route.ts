@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const API_URL = process.env.API_URL ?? 'http://localhost:5176';
 
+/** Status que, pela spec do Fetch, não podem ter corpo na resposta. */
+const STATUS_SEM_CORPO = [204, 205, 304];
+
 type Params = Promise<{ path: string[] }>;
 
 async function proxy(req: NextRequest, params: Params): Promise<NextResponse> {
@@ -22,7 +25,15 @@ async function proxy(req: NextRequest, params: Params): Promise<NextResponse> {
     body: hasBody ? await req.text() : undefined,
   });
 
+  if (STATUS_SEM_CORPO.includes(response.status)) {
+    return new NextResponse(null, { status: response.status });
+  }
+
   const body = await response.text();
+
+  if (body.length === 0) {
+    return new NextResponse(null, { status: response.status });
+  }
 
   return new NextResponse(body, {
     status: response.status,
