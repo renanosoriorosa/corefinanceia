@@ -130,11 +130,23 @@ Tela com:
 Gráfico de barras contendo:
 - meses do ano
 - valor pago por mês
+- linha tracejada com a média mensal (meses sem lançamento não entram no cálculo)
+- linha de média móvel de 3 meses
+- barras fantasma com a projeção dos meses que ainda não fecharam
 
 ### Exemplo
 Janeiro: R$350
 Fevereiro: R$380
 Março: R$340
+
+### Indicadores
+- total do ano, maior mês, média mensal e projeção de fechamento
+- comparativo do mês de referência com o mês anterior (variação %)
+- comparativo do acumulado do ano com o mesmo período do ano anterior (variação %)
+
+### Distribuição e maiores gastos
+- gráfico de pizza com a participação de cada conta fixa (as menores agrupadas em "Outras"; lançamentos sem conta aparecem como "Avulsas")
+- lista dos 5 maiores lançamentos do ano
 
 ---
 
@@ -228,4 +240,3 @@ Responsável por:
 - exportação PDF
 - metas financeiras
 - notificações
-- gráficos avançados
