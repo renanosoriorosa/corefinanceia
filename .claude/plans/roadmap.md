@@ -21,6 +21,8 @@ O que falta para o sistema "encorpar": ele era **single-user implícito** (resol
 
 Detalhamento abaixo. Fases 3 e 4 serão detalhadas quando chegarem.
 
+> **Trilha paralela:** [Observabilidade](Observabilidade/00-visao-geral.md) — laboratório didático de health checks, logs, métricas, tracing, dashboards e alertas (Serilog + OpenTelemetry + Grafana/Prometheus/Loki/Tempo), rodando no mesmo `docker-compose.yml` atrás do profile `obs`. Não bloqueia as fases 3 e 4 e **absorve** dois itens da fase 4: *Serilog estruturado + correlation id* e *health checks*.
+
 ---
 
 ## ✅ Fase 1 — Autenticação e multiusuário (CONCLUÍDA)
@@ -114,8 +116,8 @@ Banco descartável no LocalDB (`CoreFinanceFase2`), API em `localhost:5188`, dad
 
 ## ⬜ Fase 4 — Plataforma
 
-- Serilog estruturado + correlation id.
-- Health checks (`/health`) incluindo o SQL Server.
+- ~~Serilog estruturado + correlation id~~ → migrado para a trilha [Observabilidade](Observabilidade/00-visao-geral.md), fases 03 e 06.
+- ~~Health checks (`/health`) incluindo o SQL Server~~ → migrado para a trilha [Observabilidade](Observabilidade/00-visao-geral.md), fase 01.
 - Notificações de vencimento via `HostedService`.
 - Toggle de tema claro/escuro persistido (está no PRD e nunca foi implementado).
 - Testes xUnit nos services + integração com `WebApplicationFactory`.

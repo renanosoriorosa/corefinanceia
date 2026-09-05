@@ -14,6 +14,7 @@ builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddJwtAuth(builder.Configuration);
 builder.Services.AddApplication();
 builder.Services.AddInfra(builder.Configuration);
+builder.Services.AddHealthChecksConfig(builder.Configuration);
 
 builder.Services.AddCors(options =>
 {
@@ -29,6 +30,7 @@ app.UseHttpsRedirection();
 app.UseCors("AllowAll");
 app.UseAuthentication();
 app.UseAuthorization();
+app.MapHealthChecksConfig();
 app.MapControllers();
 
 app.Run();
