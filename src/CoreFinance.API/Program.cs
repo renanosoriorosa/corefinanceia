@@ -1,5 +1,6 @@
 using CoreFinance.API.Extensions;
 using CoreFinance.API.Middlewares;
+using CoreFinance.API.Observability;
 using CoreFinance.API.Services;
 using CoreFinance.Application;
 using CoreFinance.Domain.Interfaces;
@@ -7,7 +8,10 @@ using CoreFinance.Infra;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllers();
+var demoHabilitado = builder.Configuration.GetValue<bool>("Observability:Demo:Enabled");
+
+builder.Services.AddControllers(options =>
+    options.Conventions.Add(new DemoControllerConvention(demoHabilitado)));
 builder.Services.AddSwaggerConfig();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();

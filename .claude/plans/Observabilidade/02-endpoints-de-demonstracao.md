@@ -2,6 +2,7 @@
 
 > ⬅️ anterior: [01 — Health Checks](01-health-checks.md) · ➡️ próxima: [03 — Logs](03-logs-serilog-loki.md)
 > **Containers novos:** nenhum. Fase curta, mas **precisa vir cedo**: todas as fases seguintes dependem dela para ter sinal para observar.
+> **Status:** ✅ concluída e validada em 2026-09-05.
 
 ---
 
@@ -150,9 +151,9 @@ curl -i http://localhost:5176/api/demo/success   # 404
 
 ## Critério de aceite
 
-- [ ] Os 4 endpoints respondem conforme a tabela
-- [ ] `error` passa pelo `GlobalExceptionMiddleware` e aparece nos logs com stack trace
-- [ ] Parâmetros fora de faixa são rejeitados (400), não obedecidos
-- [ ] Com a flag desligada, `/api/demo/*` retorna 404
-- [ ] `scripts/gerar-carga.ps1` roda os 4 cenários
-- [ ] Nenhum arquivo de `Application`/`Domain`/`Infra` foi alterado
+- [x] Os 4 endpoints respondem conforme a tabela
+- [x] `error` passa pelo `GlobalExceptionMiddleware` e aparece nos logs com stack trace (com arquivo e linha)
+- [x] Parâmetros fora de faixa são rejeitados (400), não obedecidos — `delay=999999999` e `delay=-1` viram 400 em ~3 ms; os limites válidos (`delay=0`, `delay=10000`, `errorRate=0..100`) passam
+- [x] Com a flag desligada, `/api/demo/*` retorna 404 — e some também do `swagger.json`, porque a rota não chega a ser criada
+- [x] `scripts/gerar-carga.ps1` roda os 4 cenários
+- [x] Nenhum arquivo de `Application`/`Domain`/`Infra` foi alterado (confirmado por `git status` nas três pastas)

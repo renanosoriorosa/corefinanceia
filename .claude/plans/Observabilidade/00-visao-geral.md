@@ -1,6 +1,6 @@
 # Trilha de Observabilidade do CoreFinance — Visão geral
 
-> **Status:** fase [01](01-health-checks.md) concluída e validada em 2026-09-05 · fases 02-10 pendentes.
+> **Status:** fases [01](01-health-checks.md) e [02](02-endpoints-de-demonstracao.md) concluídas e validadas em 2026-09-05 · fases 03-10 pendentes.
 > **Referência:** `observalibidade-dicas.md` (spec original, escrita para um projeto novo).
 > **Adaptação:** aplicar a spec ao CoreFinance que já existe, sem quebrar nada do que está no ar hoje.
 
@@ -159,7 +159,7 @@ Cada fase é **executável e validável sozinha**. Não começar a próxima ante
 | # | Documento | Containers novos | Ganho |
 |---|---|---|---|
 | ✅ 01 | [Health Checks](01-health-checks.md) | nenhum | "está viva?" — vitória rápida, só .NET |
-| 02 | [Endpoints de demonstração](02-endpoints-de-demonstracao.md) | nenhum | matéria-prima para todas as fases seguintes |
+| ✅ 02 | [Endpoints de demonstração](02-endpoints-de-demonstracao.md) | nenhum | matéria-prima para todas as fases seguintes |
 | 03 | [Logs: Serilog + Loki](03-logs-serilog-loki.md) | `loki`, `grafana` | "o que aconteceu?" |
 | 04 | [Métricas: OTel + Collector + Prometheus](04-metricas-otel-collector-prometheus.md) | `otel-collector`, `prometheus` | "quanto, quão rápido, quantos erros?" |
 | 05 | [Traces: Tempo](05-traces-tempo.md) | `tempo` | "onde exatamente está lento?" |
@@ -229,8 +229,8 @@ A trilha está concluída quando **todos** estiverem marcados:
 - [ ] TraceId de um log abre o trace correspondente (e vice-versa)
 - [ ] Dashboard `ASP.NET Core Observability` provisionado e sobrevivendo a `down`/`up`
 - [ ] 3 alertas configurados e disparando de verdade
-- [ ] Cenários de erro reproduzíveis por query string
-- [ ] Cenários de latência reproduzíveis por query string
+- [x] Cenários de erro reproduzíveis por query string
+- [x] Cenários de latência reproduzíveis por query string
 - [ ] `docs/OBSERVABILIDADE.md` explicando o laboratório inteiro
 - [ ] Ambiente destruído com `down -v` e recriado do zero sem intervenção manual
 
