@@ -1,6 +1,6 @@
 # Trilha de Observabilidade do CoreFinance — Visão geral
 
-> **Status:** fases [01](01-health-checks.md) e [02](02-endpoints-de-demonstracao.md) concluídas e validadas em 2026-09-05 · fases 03-10 pendentes.
+> **Status:** fases [01](01-health-checks.md), [02](02-endpoints-de-demonstracao.md) e [03](03-logs-serilog-loki.md) concluídas e validadas em 2026-09-05 · fases 04-10 pendentes.
 > **Referência:** `observalibidade-dicas.md` (spec original, escrita para um projeto novo).
 > **Adaptação:** aplicar a spec ao CoreFinance que já existe, sem quebrar nada do que está no ar hoje.
 
@@ -104,8 +104,12 @@ deployment.environment = local
 ```text
 app   = corefinance-api
 env   = local
-level = Information | Warning | Error | ...
+level = trace | debug | info | warning | error | critical
 ```
+
+> ⚠️ O `level` **não** sai como `Information`/`Warning`. O sink do Loki normaliza o nível do
+> Serilog para a convenção do Grafana antes de mandar. Confirmado na fase 03: `LogEventLevel.Information`
+> vira `info`, `Fatal` vira `critical`. Filtrar por `level="Information"` não retorna nada.
 
 **`TraceId` é campo estruturado, jamais label.** É a regra 12 da spec e o erro clássico de quem começa: cada TraceId é único, então virar label cria um stream novo por requisição e derruba o Loki. Label é para o que tem poucos valores possíveis.
 
@@ -160,7 +164,7 @@ Cada fase é **executável e validável sozinha**. Não começar a próxima ante
 |---|---|---|---|
 | ✅ 01 | [Health Checks](01-health-checks.md) | nenhum | "está viva?" — vitória rápida, só .NET |
 | ✅ 02 | [Endpoints de demonstração](02-endpoints-de-demonstracao.md) | nenhum | matéria-prima para todas as fases seguintes |
-| 03 | [Logs: Serilog + Loki](03-logs-serilog-loki.md) | `loki`, `grafana` | "o que aconteceu?" |
+| ✅ 03 | [Logs: Serilog + Loki](03-logs-serilog-loki.md) | `loki`, `grafana` | "o que aconteceu?" |
 | 04 | [Métricas: OTel + Collector + Prometheus](04-metricas-otel-collector-prometheus.md) | `otel-collector`, `prometheus` | "quanto, quão rápido, quantos erros?" |
 | 05 | [Traces: Tempo](05-traces-tempo.md) | `tempo` | "onde exatamente está lento?" |
 | 06 | [Correlação](06-correlacao-traceid-logs-traces.md) | nenhum | amarra log ↔ trace — o coração do lab |
@@ -220,8 +224,8 @@ A trilha está concluída quando **todos** estiverem marcados:
 - [ ] `docker compose --profile obs up -d` sobe a stack inteira
 - [ ] `docker compose up -d` continua subindo só `api` + `web` (nada quebrou)
 - [x] Health checks respondendo em `/health`, `/health/live`, `/health/ready`
-- [ ] Logs estruturados saindo da API
-- [ ] Logs pesquisáveis no Grafana via Loki
+- [x] Logs estruturados saindo da API
+- [x] Logs pesquisáveis no Grafana via Loki
 - [ ] Métricas expostas pelo Collector e coletadas pelo Prometheus (target `UP`)
 - [ ] Métricas visíveis no Grafana
 - [ ] Traces chegando no Tempo

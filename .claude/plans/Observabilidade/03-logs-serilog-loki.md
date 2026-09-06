@@ -2,6 +2,7 @@
 
 > ⬅️ anterior: [02 — Endpoints de demonstração](02-endpoints-de-demonstracao.md) · ➡️ próxima: [04 — Métricas](04-metricas-otel-collector-prometheus.md)
 > **Containers novos:** `loki`, `grafana` — primeira fase que mexe no `docker-compose.yml`.
+> **Status:** ✅ concluída e validada em 2026-09-05. Ver [O que a execução mudou](#o-que-a-execução-mudou-em-relação-ao-plano).
 
 ---
 
@@ -282,10 +283,102 @@ Checagens finais:
 
 ## Critério de aceite
 
-- [ ] Logs estruturados no console, uma linha por requisição, com `StatusCode` e `Elapsed`
-- [ ] `{app="corefinance-api"}` retorna logs no Grafana
-- [ ] `| json | StatusCode = 500` isola os erros do `/api/demo/error`
-- [ ] Labels no Loki limitados a `app`, `env`, `level` (confira em Explore → *Label browser*)
-- [ ] `TraceId` presente como campo do JSON (vazio por ora — será preenchido na fase 05)
-- [ ] Datasource sobrevive a `down`/`up`
-- [ ] Sem o profile `obs`, a API continua respondendo normalmente
+- [x] Logs estruturados no console, uma linha por requisição, com `StatusCode` e `Elapsed`
+- [x] `{app="corefinance-api"}` retorna logs no Grafana
+- [x] `| json | StatusCode = 500` isola os erros do `/api/demo/error`
+- [x] Labels no Loki limitados a `app`, `env`, `level` (confira em Explore → *Label browser*)
+- [x] `TraceId` presente como campo do JSON — **já preenchido**, não vazio (ver abaixo)
+- [x] Datasource sobrevive a `down`/`up`
+- [x] Sem o profile `obs`, a API continua respondendo normalmente
+
+---
+
+## O que a execução mudou em relação ao plano
+
+Quatro coisas só apareceram quando a stack subiu de verdade. Todas estão aplicadas no código.
+
+### 1. `TraceId` já vem preenchido — a fase 05 não é pré-requisito
+
+O plano previa `TraceId` vazio até o OpenTelemetry entrar. Não é o que acontece: o próprio
+ASP.NET Core abre uma `Activity` por requisição, e o `Enrich.WithSpan()` a encontra. Já saem
+`TraceId`, `SpanId` e `ParentId` em toda linha, inclusive nos logs de dentro do controller.
+
+O que a fase 05 acrescenta não é o TraceId — é o **destino** dele: um trace navegável no Tempo
+para o mesmo id que o log já carrega.
+
+### 2. `app` e `env` não podem ser enricher *e* label ao mesmo tempo
+
+A primeira execução produziu a linha contraditória: label `env=local`, campo `env=Development`.
+O `Enrich.WithProperty` usava `EnvironmentName` (conceito do ASP.NET), o label do sink usava
+`local` (convenção do lab) — e como `propertiesAsLabels` só promove `level`, os dois sobreviviam
+lado a lado.
+
+Os dois enrichers saíram do `Program.cs`. Quem define `app` e `env` é o sink, em um lugar só.
+
+### 3. O Loki 3.x inventa labels por conta própria
+
+Sem configuração extra, apareceram **`service_name`** (derivado de `app`) e **`detected_level`**
+(derivado do conteúdo da linha) — cópias de labels que a aplicação já manda de propósito. O
+`limits_config` agora desliga os dois:
+
+```yaml
+  discover_service_name: []
+  discover_log_levels: false
+```
+
+A lição vale além do lab: **quem decide o label é quem gera o log**, não o backend.
+
+### 4. `/health` precisou de um `GetLevel` próprio
+
+O `HEALTHCHECK` do Docker bate em `/health/live` a cada 30 segundos. Em `Information` isso vira
+2.880 linhas por dia — de longe a maior fonte de log do laboratório, enterrando o sinal real.
+`options.GetLevel` rebaixa health check bem-sucedido para `Debug` (abaixo do mínimo, então nem
+sai) e o mantém em `Warning`/`Error` quando falha, que é justamente quando você quer vê-lo.
+
+### 5. Viewer anônimo não enxergava o Explore
+
+Sintoma: stack inteira no ar, Loki com dados, datasource conectado — e nada no Grafana.
+
+Causa: no Grafana OSS 11, a role **Viewer não tem a permissão `datasources:explore`**, e sem ela
+o item *Explore* simplesmente **some da navegação**. Como o `GF_AUTH_ANONYMOUS_ORG_ROLE` é
+`Viewer`, quem abre `localhost:3001` sem logar não tem onde rodar uma query — que é a única
+coisa que o lab faz nesta fase.
+
+Corrigido no compose:
+
+```yaml
+      GF_USERS_VIEWERS_CAN_EDIT: "true"
+```
+
+Alternativa seria logar como `admin`/`admin` a cada visita, ou promover o anônimo a `Editor`.
+`viewers_can_edit` é o menor dos três: mantém a role Viewer (não salva dashboard) e devolve só
+o Explore.
+
+> 💡 Diagnóstico que isola isso em um comando — compara o que cada usuário pode fazer:
+> ```bash
+> curl -s localhost:3001/api/access-control/user/permissions            # anonimo
+> curl -s -u admin:admin localhost:3001/api/access-control/user/permissions
+> ```
+
+> 💡 E para provar que o problema é a UI, e não o pipeline, consulte o Loki **pelo proxy do
+> Grafana** (o mesmo caminho que a tela usa):
+> ```bash
+> curl -s -u admin:admin -G >   'http://localhost:3001/api/datasources/proxy/uid/loki/loki/api/v1/query_range' >   --data-urlencode 'query={app="corefinance-api"}' --data-urlencode 'since=1h'
+> ```
+> Se isso retorna linha e a tela não mostra, o problema é permissão ou intervalo de tempo.
+
+### Outros ajustes de execução
+
+| O que | Por quê |
+|---|---|
+| `UseSerilogRequestLogging` **depois** do `GlobalExceptionMiddleware` | Se viesse antes, a exceção já teria virado resposta 500 e a requisição seria registrada em `Information`, sem stack trace. Depois, a exceção ainda está viva ao passar pelo middleware do Serilog: sai `Error` com stack. |
+| `SelfLog` ligado em `Development` | O sink falha em silêncio por design. Sem isso, "não aparece nada no Grafana" não tem diagnóstico nenhum. |
+| `uri` do sink = `http://localhost:3100` no `appsettings.json` | O valor de container (`http://loki:3100`) vive só no compose, via `Serilog__WriteTo__1__Args__uri`. Assim `dotnet run` na máquina também alcança o Loki. |
+| `Microsoft` e `System` em `MinimumLevel.Override` | Sem eles ainda sobrava ruído de framework fora do namespace `Microsoft.AspNetCore`. |
+| `/ready` do Loki responde 503 nos primeiros ~20s | `Ingester not ready: waiting for 15s after being ready` é a janela normal de warm-up, não erro. Depois vira `ready`. O `/` do Loki responde **404 para sempre**: ele não tem UI, é só API — a interface é o Grafana. |
+
+### Ponta solta conhecida
+
+`Failed to determine the https port for redirect.` aparece uma vez a cada start, vinda do
+`UseHttpsRedirection` em um container que só expõe HTTP. É anterior a esta fase e inofensiva —
+mas é exatamente o tipo de `Warning` recorrente que polui alerta. Candidata à fase 08.

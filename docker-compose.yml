@@ -14,6 +14,10 @@ services:
       Jwt__Audience: "CoreFinance"
       Jwt__ExpiraEmMinutos: "480"
       Observability__Demo__Enabled: "true"
+      # Indice 1 = o sink GrafanaLoki no array Serilog:WriteTo do appsettings.json.
+      # No host o Loki e localhost:3100; aqui dentro da rede do compose e o hostname do servico.
+      # Se um sink for inserido antes dele no appsettings, este indice precisa mudar junto.
+      Serilog__WriteTo__1__Args__uri: "http://loki:3100"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -31,3 +35,47 @@ services:
       api:
         condition: service_healthy
     restart: unless-stopped
+
+  # --- Stack de observabilidade (profile "obs") -------------------------------
+  # `docker compose up -d`                  -> so api + web, como sempre foi.
+  # `docker compose --profile obs up -d`    -> sobe tambem o laboratorio.
+
+  loki:
+    image: grafana/loki:3.4.2
+    container_name: corefinance-loki
+    profiles: ["obs"]
+    command: -config.file=/etc/loki/loki-config.yml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./docker/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/loki
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.6.1
+    container_name: corefinance-grafana
+    profiles: ["obs"]
+    ports:
+      - "3001:3000"          # 3000 no host ja e do web
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      # Sem isto o Viewer nao recebe a permissao datasources:explore e o menu Explore some da
+      # navegacao — ou seja, quem entra sem logar nao tem onde consultar log nenhum, que e a
+      # unica coisa que o lab faz nesta fase.
+      GF_USERS_VIEWERS_CAN_EDIT: "true"
+      GF_USERS_DEFAULT_THEME: dark
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+volumes:
+  loki-data:
+  grafana-data:
