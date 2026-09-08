@@ -1,0 +1,46 @@
+# Modelo mental do Collector, inteiro: receiver -> processor -> exporter.
+# Ele existe para a aplicacao nao conhecer o backend: trocar Prometheus por outra coisa
+# mexe neste arquivo, nao no codigo. E, de quebra, a API usa so pacotes OTel estaveis.
+#
+# O pipeline de traces entra na fase 05.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Precisa ser o PRIMEIRO da lista: existe para o Collector recusar dados em vez de morrer
+  # por OOM. Depois do batch protegeria tarde demais.
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+  batch:
+    timeout: 5s
+
+exporters:
+  # Modelo pull: o Collector expoe /metrics em :8889 e o Prometheus vem buscar.
+  # Da para `curl http://localhost:8889/metrics` e ver exatamente o que o Prometheus veria.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    resource_to_telemetry_conversion:
+      enabled: true      # service.name, deployment.environment etc. viram labels da metrica
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
+  telemetry:
+    logs:
+      level: info

@@ -1,0 +1,17 @@
+# O Prometheus nao recebe metrica: ele vai buscar (scrape). Quem "empurra" e a API,
+# mas so ate o Collector — dali para frente o modelo e pull.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # As metricas da API, ja traduzidas de OTLP para o formato Prometheus pelo Collector.
+  - job_name: otel-collector
+    static_configs:
+      - targets: ["otel-collector:8889"]
+
+  # O proprio Prometheus. Util para saber se ele esta saudavel sem depender de mais nada.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

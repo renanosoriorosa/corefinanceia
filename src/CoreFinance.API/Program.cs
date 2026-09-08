@@ -44,6 +44,7 @@ builder.Services.AddJwtAuth(builder.Configuration);
 builder.Services.AddApplication();
 builder.Services.AddInfra(builder.Configuration);
 builder.Services.AddHealthChecksConfig(builder.Configuration);
+builder.Services.AddObservability(builder.Configuration, builder.Environment);
 
 builder.Services.AddCors(options =>
 {

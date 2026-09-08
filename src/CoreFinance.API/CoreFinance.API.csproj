@@ -13,6 +13,11 @@
     <PackageReference Include="Serilog.Sinks.Grafana.Loki" Version="8.*" />
     <PackageReference Include="Serilog.Enrichers.Environment" Version="3.*" />
     <PackageReference Include="Serilog.Enrichers.Span" Version="3.*" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.18.*" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.18.*" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.18.*" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.12.*" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.18.*" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.*">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>

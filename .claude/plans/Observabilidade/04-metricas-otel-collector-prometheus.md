@@ -2,6 +2,8 @@
 
 > ⬅️ anterior: [03 — Logs](03-logs-serilog-loki.md) · ➡️ próxima: [05 — Traces](05-traces-tempo.md)
 > **Containers novos:** `otel-collector`, `prometheus`.
+> **Status:** ✅ concluída e validada em 2026-09-05. O que a execução mudou em relação ao plano
+> está em [Resultado da execução](#resultado-da-execucao), no fim do documento.
 
 ---
 
@@ -18,12 +20,17 @@ E entender por que métrica é um sinal **agregado e barato** — 10 milhões de
 **Pacotes** (todos **estáveis** — benefício direto de ter escolhido o Collector):
 
 ```xml
-<PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.11.*" />
-<PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.11.*" />
-<PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.11.*" />
-<PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.11.*" />
-<PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.11.*" />
+<PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.18.*" />
+<PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.18.*" />
+<PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.18.*" />
+<PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.12.*" />
+<PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.18.*" />
 ```
+
+> ⚠️ **Não use 1.11.** O plano original pedia `1.11.*`, mas o build acusa `NU1902` — o
+> `OpenTelemetry.Exporter.OpenTelemetryProtocol` até 1.12.0 tem vulnerabilidade moderada conhecida
+> ([GHSA-4625-4j76-fww9](https://github.com/advisories/GHSA-4625-4j76-fww9)). Da 1.14 em diante o
+> aviso some. A `Instrumentation.Runtime` fica em 1.12 porque é a última publicada.
 
 > Sem o Collector, exportar Prometheus direto exigiria `OpenTelemetry.Exporter.Prometheus.AspNetCore`, que ainda é **beta**. Esse é um argumento concreto a favor da decisão de arquitetura tomada em [00](00-visao-geral.md).
 
@@ -41,8 +48,10 @@ docker/prometheus/prometheus.yml
 **Arquivos alterados:**
 
 ```text
-src/CoreFinance.API/Program.cs
-src/CoreFinance.Application/Payments/Services/PaymentService.cs   ← 1 linha
+src/CoreFinance.API/Program.cs                                    ← 1 linha
+src/CoreFinance.API/CoreFinance.API.csproj                        ← 5 pacotes
+src/CoreFinance.API/appsettings.json                              ← Observability:Enabled
+src/CoreFinance.Application/Payments/Services/PaymentService.cs   ← 1 linha + injeção
 docker/grafana/provisioning/datasources/datasources.yml
 docker-compose.yml
 ```
@@ -265,6 +274,8 @@ curl http://localhost:8889/metrics | Select-String "dotnet|process_runtime"
 
 **Anote os nomes que aparecerem** — são eles que vão para as queries e para o dashboard da [fase 07](07-dashboard-grafana.md). Os nomes de runtime variam conforme a versão da `Instrumentation.Runtime` (`process_runtime_dotnet_*` nas versões mais antigas, `dotnet_*` nas novas).
 
+Os nomes efetivamente observados nesta execução estão em [Resultado da execução](#resultado-da-execucao).
+
 ### Passo 1 — target UP
 
 `http://localhost:9090/targets` → `otel-collector` deve estar **UP**. Se estiver `DOWN`, os suspeitos são: nome do serviço errado, containers em redes diferentes, ou o Collector nem subiu (`docker logs corefinance-otel-collector`).
@@ -348,10 +359,83 @@ O cenário `lento` é o mais instrutivo: com poucas requisições lentas no meio
 
 ## Critério de aceite
 
-- [ ] Nomes reais das métricas anotados a partir de `:8889/metrics` (não copiados da spec)
-- [ ] Target `otel-collector` **UP** no Prometheus
-- [ ] As 6 consultas de PromQL acima retornam dados
-- [ ] Cenário de erro move a taxa de erro; cenário lento move o P95 muito mais que a média
-- [ ] `corefinance_payments_created_total` incrementa ao criar pagamento pela tela
-- [ ] `corefinance_health_status` cai para 0 com o SQL Server parado
-- [ ] Datasource Prometheus provisionado no Grafana
+- [x] Nomes reais das métricas anotados a partir de `:8889/metrics` (não copiados da spec)
+- [x] Target `otel-collector` **UP** no Prometheus
+- [x] As 6 consultas de PromQL acima retornam dados
+- [x] Cenário de erro move a taxa de erro; cenário lento move o P95 muito mais que a média
+- [x] `corefinance_payments_created_total` incrementa ao criar pagamento
+- [x] `corefinance_health_status` cai para 0 com o SQL Server parado
+- [x] Datasource Prometheus provisionado no Grafana
+
+---
+
+<a id="resultado-da-execucao"></a>
+
+## Resultado da execução (2026-09-05)
+
+### Nomes reais das métricas
+
+Lidos de `curl http://localhost:8889/metrics` com a stack no ar. **São estes que valem** para as fases 07 e 08:
+
+| Família | Métricas |
+|---|---|
+| HTTP servidor | `http_server_request_duration_seconds_{bucket,sum,count}`, `http_server_active_requests` |
+| HTTP cliente | `http_client_request_duration_seconds_*`, `http_client_active_requests`, `http_client_open_connections`, `http_client_request_time_in_queue_seconds`, `dns_lookup_duration_seconds` |
+| Kestrel | `kestrel_active_connections`, `kestrel_connection_duration_seconds`, `kestrel_queued_connections` |
+| Roteamento | `aspnetcore_routing_match_attempts_total` |
+| Runtime | `process_runtime_dotnet_*` (GC, JIT, thread pool, exceptions, monitor lock, timers) |
+| Negócio | `corefinance_payments_created_total` |
+| Saúde | `corefinance_health_status`, `corefinance_health_check_status` |
+| Meta | `target_info` |
+
+Confirmado: **`http_requests_total` não existe** — o contador de requisições é o `_count` do histograma, exatamente como a fase previa. E a `Instrumentation.Runtime` 1.12 ainda usa o prefixo antigo `process_runtime_dotnet_*`, não `dotnet_*`.
+
+Labels de `http_server_request_duration_seconds_*`: `http_request_method`, `http_response_status_code`, `http_route`, `network_protocol_version`, `url_scheme` — mais os resource attributes (`service_name`, `service_namespace`, `deployment_environment`, `service_version`, `service_instance_id`, `telemetry_sdk_*`).
+
+> ⚠️ **`job` e `instance` não são os da aplicação.** O Prometheus injeta os seus no scrape e renomeia os que vieram do resource para `exported_job` e `exported_instance`. Ou seja: `job="corefinance-api"` **não retorna nada** — o job é `otel-collector`. Para filtrar a aplicação, use `service_name="corefinance-api"`.
+
+### Números medidos
+
+Carga mista de 90 s (`gerar-carga.ps1`), comparando o que o script mediu no cliente com o que o PromQL devolveu:
+
+| | script (cliente) | PromQL (servidor) |
+|---|---|---|
+| taxa de erro | 5,7 % | 5,2 % |
+| latência média | 135 ms | 132 ms |
+| P95 | 384 ms | 469 ms |
+
+Média praticamente idêntica; **o P95 diverge porque é estimado por interpolação de bucket**, não medido. É a lição do histograma, aparecendo sozinha no primeiro teste.
+
+O cenário lento reforçou os dois pontos de uma vez — 30 requisições de 3 s no meio de ~2.700 rápidas:
+
+- média global subiu de **132 ms → 156 ms** (+18 %), quase nada;
+- P95 da rota `api/Demo/slow` foi a **4,87 s** para requisições que levaram **3,0 s**.
+
+> 💡 Esse 4,87 s não é erro de medição: os buckets padrão do ASP.NET Core saltam de 2,5 s para 5 s. Com todas as amostras caindo no mesmo bucket, `histogram_quantile` só sabe interpolar entre 2,5 e 5. **A precisão do percentil é a resolução dos buckets naquela faixa** — se a sua latência real vive numa faixa mal coberta, o percentil mente para cima. Corrigir isso é definir buckets próprios via View do OpenTelemetry, não trocar a query.
+
+### Métrica de saúde
+
+`corefinance_health_status` caiu para **0** com `docker stop sqlserver_container` e voltou a **1** sozinha depois do `docker start`.
+
+> ⚠️ **Conte até ~1 minuto, não até 15 segundos.** O caminho inteiro é: `docker stop` (até 10 s de grace) → publisher roda no período de 15 s → o check do SQL espera o `ConnectTimeout` de 5 s → exportação OTLP a cada 15 s → scrape do Prometheus a cada 15 s. Na prática foram **~80 s** para a queda e **~45 s** para a recuperação. Isso não é lentidão do lab: é a latência real de qualquer alerta baseado em métrica, e o motivo de a [fase 08](08-alertas.md) precisar de um `for:` compatível com ela.
+
+Além do gauge previsto no plano, foi adicionado `corefinance_health_check_status`, com o label `health_check` (`self`, `sqlserver`). Cardinalidade de 2 séries, e responde "qual dependência caiu?" sem abrir o `/health`.
+
+> 💡 O gauge **não emite amostra nenhuma** antes do primeiro ciclo do publisher. Devolver 0 na partida seria afirmar que a API está fora do ar justamente enquanto ela sobe — e alertas de "saúde = 0" disparariam a cada deploy.
+
+### Desvios do plano original
+
+| Desvio | Por quê |
+|---|---|
+| Pacotes OTel em `1.18.*` (Runtime em `1.12.*`), não `1.11.*` | `NU1902` no exportador OTLP até 1.12.0 |
+| Collector publica também `4317` e `4318`, não só `8889` | Mesmo motivo do `3100` do Loki na fase 03: rodando a API pelo Visual Studio, fora do compose, ela precisa alcançar o Collector por `localhost` |
+| `OTEL_METRIC_EXPORT_INTERVAL: 15000` no compose | Padrão do SDK é 60 s. Alinhado ao `scrape_interval`, o efeito da carga aparece em ~15 s em vez de sumir por um minuto |
+| `deployment.environment` e `service.namespace` vêm do ambiente, não do código | O plano carimbava `EnvironmentName` por cima do `OTEL_RESOURCE_ATTRIBUTES`, e a métrica saía como `Development` enquanto o log do Loki dizia `local` |
+| Flag `Observability:Enabled` (padrão `true`) | Armadilha 1 da [visão geral](00-visao-geral.md#7-armadilhas-globais-leia-antes-de-começar) previa a saída para rodar sem o profile `obs`; agora ela existe de fato |
+| `spike_limit_mib: 64` no `memory_limiter` | Sem ele o Collector 0.121 assume 20 % do limite; explicitar deixa a intenção visível |
+| `AppMetrics` registrado duas vezes (concreto + interface) | O `HealthMetricsPublisher` é da API e precisa do tipo concreto; a Application só enxerga `IAppMetrics`. Sem a segunda linha seriam dois `Meter` com o mesmo nome |
+
+### Pendências herdadas para a fase 07
+
+- Todas as queries do dashboard precisam filtrar por `service_name`, nunca por `job`.
+- Considerar buckets customizados para `http.server.request.duration` se o P95 continuar impreciso na faixa de segundos.

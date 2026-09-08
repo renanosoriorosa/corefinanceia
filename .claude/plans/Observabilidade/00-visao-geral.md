@@ -1,6 +1,6 @@
 # Trilha de Observabilidade do CoreFinance — Visão geral
 
-> **Status:** fases [01](01-health-checks.md), [02](02-endpoints-de-demonstracao.md) e [03](03-logs-serilog-loki.md) concluídas e validadas em 2026-09-05 · fases 04-10 pendentes.
+> **Status:** fases [01](01-health-checks.md), [02](02-endpoints-de-demonstracao.md), [03](03-logs-serilog-loki.md) e [04](04-metricas-otel-collector-prometheus.md) concluídas e validadas em 2026-09-05 · fases 05-10 pendentes.
 > **Referência:** `observalibidade-dicas.md` (spec original, escrita para um projeto novo).
 > **Adaptação:** aplicar a spec ao CoreFinance que já existe, sem quebrar nada do que está no ar hoje.
 
@@ -99,6 +99,19 @@ service.namespace      = corefinance
 deployment.environment = local
 ```
 
+> ⚠️ Quem manda nesses três é `OTEL_RESOURCE_ATTRIBUTES` / `OTEL_SERVICE_NAME` no compose, **não**
+> o código. O `ObservabilityExtensions` só preenche o que o ambiente não definiu — é o que faz a
+> métrica dizer `deployment_environment="local"`, igual ao label `env` do Loki. Se o código
+> carimbasse `EnvironmentName` por cima, a mesma execução apareceria como `Development` na métrica
+> e `local` no log, e a correlação da [fase 06](06-correlacao-traceid-logs-traces.md) nasceria torta.
+
+> ⚠️ **No Prometheus, `service.name` não vira `job`.** O `resource_to_telemetry_conversion` do
+> Collector transforma os resource attributes em labels, mas `job` e `instance` colidem com os
+> labels que o próprio Prometheus injeta no scrape — e os originais são renomeados para
+> `exported_job` e `exported_instance`. Na prática: filtrar por `job="corefinance-api"` **não
+> retorna nada**; o filtro certo é `service_name="corefinance-api"`. Vale para as queries da
+> [fase 07](07-dashboard-grafana.md) e para as regras da [08](08-alertas.md).
+
 ### Labels do Loki — **só estes três**
 
 ```text
@@ -165,7 +178,7 @@ Cada fase é **executável e validável sozinha**. Não começar a próxima ante
 | ✅ 01 | [Health Checks](01-health-checks.md) | nenhum | "está viva?" — vitória rápida, só .NET |
 | ✅ 02 | [Endpoints de demonstração](02-endpoints-de-demonstracao.md) | nenhum | matéria-prima para todas as fases seguintes |
 | ✅ 03 | [Logs: Serilog + Loki](03-logs-serilog-loki.md) | `loki`, `grafana` | "o que aconteceu?" |
-| 04 | [Métricas: OTel + Collector + Prometheus](04-metricas-otel-collector-prometheus.md) | `otel-collector`, `prometheus` | "quanto, quão rápido, quantos erros?" |
+| ✅ 04 | [Métricas: OTel + Collector + Prometheus](04-metricas-otel-collector-prometheus.md) | `otel-collector`, `prometheus` | "quanto, quão rápido, quantos erros?" |
 | 05 | [Traces: Tempo](05-traces-tempo.md) | `tempo` | "onde exatamente está lento?" |
 | 06 | [Correlação](06-correlacao-traceid-logs-traces.md) | nenhum | amarra log ↔ trace — o coração do lab |
 | 07 | [Dashboard](07-dashboard-grafana.md) | nenhum | uma tela responde "estou saudável agora?" |
@@ -226,7 +239,7 @@ A trilha está concluída quando **todos** estiverem marcados:
 - [x] Health checks respondendo em `/health`, `/health/live`, `/health/ready`
 - [x] Logs estruturados saindo da API
 - [x] Logs pesquisáveis no Grafana via Loki
-- [ ] Métricas expostas pelo Collector e coletadas pelo Prometheus (target `UP`)
+- [x] Métricas expostas pelo Collector e coletadas pelo Prometheus (target `UP`)
 - [ ] Métricas visíveis no Grafana
 - [ ] Traces chegando no Tempo
 - [ ] Traces visíveis e navegáveis no Grafana

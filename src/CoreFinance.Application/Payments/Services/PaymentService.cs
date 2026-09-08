@@ -1,4 +1,5 @@
 using CoreFinance.Application.Common;
+using CoreFinance.Application.Common.Observability;
 using CoreFinance.Application.Payments.Dtos;
 using CoreFinance.Application.Payments.Interfaces;
 using CoreFinance.Domain.Entities;
@@ -13,17 +14,20 @@ public class PaymentService : IPaymentService
     private readonly IFixedAccountRepository _fixedAccountRepository;
     private readonly IValidator<CreatePaymentRequest> _createValidator;
     private readonly IValidator<UpdatePaymentRequest> _updateValidator;
+    private readonly IAppMetrics _metrics;
 
     public PaymentService(
         IPaymentRepository repository,
         IFixedAccountRepository fixedAccountRepository,
         IValidator<CreatePaymentRequest> createValidator,
-        IValidator<UpdatePaymentRequest> updateValidator)
+        IValidator<UpdatePaymentRequest> updateValidator,
+        IAppMetrics metrics)
     {
         _repository = repository;
         _fixedAccountRepository = fixedAccountRepository;
         _createValidator = createValidator;
         _updateValidator = updateValidator;
+        _metrics = metrics;
     }
 
     public async Task<Result<IEnumerable<PaymentDto>>> ObterTodosAsync()
@@ -66,6 +70,9 @@ public class PaymentService : IPaymentService
 
         await _repository.AdicionarAsync(pagamento);
         await _repository.SalvarAsync();
+
+        // Metrica de negocio: so conta o que de fato foi persistido.
+        _metrics.PagamentoCriado(request.IsFixedAccount);
 
         var criado = await _repository.ObterPorIdComContaFixaAsync(pagamento.Id);
         return Result<PaymentDto>.Ok(ToDto(criado!));

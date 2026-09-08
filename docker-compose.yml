@@ -18,6 +18,18 @@ services:
       # No host o Loki e localhost:3100; aqui dentro da rede do compose e o hostname do servico.
       # Se um sink for inserido antes dele no appsettings, este indice precisa mudar junto.
       Serilog__WriteTo__1__Args__uri: "http://loki:3100"
+      # Sinais OTLP (metricas na fase 04, traces na 05) vao para o Collector, nunca direto
+      # para o backend. Com o profile "obs" desligado o Collector nao existe e o SDK apenas
+      # loga falha de exportacao em backoff — a API continua respondendo. Para calar de vez:
+      # Observability__Enabled: "false".
+      OTEL_SERVICE_NAME: corefinance-api
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=corefinance,deployment.environment=local
+      # Padrao do SDK e 60s. Alinhado ao scrape_interval do Prometheus, o que voce acabou de
+      # provocar aparece no grafico em ~15s em vez de "sumir" por um minuto — a diferenca entre
+      # o lab ensinar e o lab frustrar. Em producao, 60s economiza CPU e rede.
+      OTEL_METRIC_EXPORT_INTERVAL: "15000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -74,8 +86,42 @@ services:
       - grafana-data:/var/lib/grafana
     depends_on:
       - loki
+      - prometheus
+    restart: unless-stopped
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.121.0
+    container_name: corefinance-otel-collector
+    profiles: ["obs"]
+    command: ["--config=/etc/otelcol/config.yml"]
+    volumes:
+      - ./docker/otel-collector/otel-collector-config.yml:/etc/otelcol/config.yml:ro
+    ports:
+      # 4317/4318 ficam publicados pelo mesmo motivo do 3100 do Loki: rodando a API pelo
+      # Visual Studio (fora do compose) ela precisa alcancar o Collector pelo localhost.
+      - "4317:4317"        # OTLP gRPC
+      - "4318:4318"        # OTLP HTTP
+      - "8889:8889"        # /metrics, para depuracao com curl
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    container_name: corefinance-prometheus
+    profiles: ["obs"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      - otel-collector
     restart: unless-stopped
 
 volumes:
   loki-data:
   grafana-data:
+  prometheus-data:
