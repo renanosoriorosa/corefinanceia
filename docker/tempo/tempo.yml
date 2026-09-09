@@ -1,0 +1,32 @@
+# Tempo em modo monolitico (tudo num processo): distributor recebe, ingester acumula em blocos,
+# compactor limpa, storage grava. Em producao cada um desses seria um deployment separado —
+# aqui e um container so, e a configuracao mostra as pecas mesmo assim.
+
+server:
+  http_listen_port: 3200          # consulta (o Grafana bate aqui)
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+# So gRPC: quem escreve aqui e o Collector, e o pipeline de traces dele exporta em gRPC.
+# Abrir HTTP tambem seria superficie sem uso — a API nunca fala com o Tempo diretamente.
+
+ingester:
+  # De quanto em quanto tempo o bloco em memoria e cortado e vira arquivo. 5 min e curto de
+  # proposito: derrubar o container perde no maximo esse tanto de trace.
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    block_retention: 168h         # 7 dias, mesma janela do Prometheus
+
+storage:
+  trace:
+    backend: local                # disco do container; em producao seria S3/GCS/Azure
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal

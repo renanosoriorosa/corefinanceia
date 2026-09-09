@@ -2,7 +2,8 @@
 # Ele existe para a aplicacao nao conhecer o backend: trocar Prometheus por outra coisa
 # mexe neste arquivo, nao no codigo. E, de quebra, a API usa so pacotes OTel estaveis.
 #
-# O pipeline de traces entra na fase 05.
+# A fase 05 provou o argumento: adicionar traces foi um exporter + um pipeline AQUI.
+# A aplicacao nao mudou uma linha — ela ja mandava OTLP desde a fase 04.
 
 receivers:
   otlp:
@@ -30,6 +31,12 @@ exporters:
     resource_to_telemetry_conversion:
       enabled: true      # service.name, deployment.environment etc. viram labels da metrica
 
+  # Modelo push, ao contrario das metricas: o Collector entrega os spans ao Tempo.
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true     # rede interna do compose; em producao, TLS de verdade
+
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133
@@ -41,6 +48,14 @@ service:
       receivers: [otlp]
       processors: [memory_limiter, batch]
       exporters: [prometheus]
+    # Mesmo receiver, mesmos processors, exporter diferente. Trocar o Tempo por Jaeger, ou mandar
+    # para os dois ao mesmo tempo, e editar esta lista — sem rebuild da API.
+    # E aqui, tambem, que entraria o tail sampling em producao (guardar todo trace com erro ou
+    # lento e uma fracao dos normais). Neste lab tudo e amostrado a 100%.
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/tempo]
   telemetry:
     logs:
       level: info

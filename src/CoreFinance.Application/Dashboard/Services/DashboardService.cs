@@ -1,4 +1,5 @@
 using CoreFinance.Application.Common;
+using CoreFinance.Application.Common.Observability;
 using CoreFinance.Application.Dashboard.Dtos;
 using CoreFinance.Application.Dashboard.Interfaces;
 using CoreFinance.Domain.Entities;
@@ -22,8 +23,27 @@ public class DashboardService : IDashboardService
 
     public async Task<Result<DashboardAnualDto>> ObterAnualAsync(int ano, Guid? contaFixaId, bool incluirNaoFixas)
     {
-        var lancamentos = Filtrar(await _paymentRepository.ObterPorAnoAsync(ano), contaFixaId, incluirNaoFixas);
-        var lancamentosAnteriores = Filtrar(await _paymentRepository.ObterPorAnoAsync(ano - 1), contaFixaId, incluirNaoFixas);
+        // O `using` nao e opcional: e o Dispose que fecha o span. Sem ele a duracao fica errada e
+        // a hierarquia quebra. E StartActivity devolve null quando ninguem escuta a fonte (por
+        // exemplo com Observability:Enabled=false), dai todo acesso ser com `activity?.`.
+        using var activity = CoreFinanceActivitySource.Instance.StartActivity("Dashboard.ObterAnual");
+
+        // Tags viram atributos pesquisaveis no Tempo (`{ span.dashboard.ano = 2026 }`). Vao aqui
+        // os parametros que explicam o custo da requisicao — nunca dado pessoal: trace tambem e
+        // dado exportado, e vale a mesma regra do log.
+        activity?.SetTag("dashboard.ano", ano);
+        activity?.SetTag("dashboard.conta_fixa_id", contaFixaId?.ToString());
+        activity?.SetTag("dashboard.incluir_nao_fixas", incluirNaoFixas);
+
+        // As duas consultas sao sequenciais e independentes. Nenhuma metrica mostra isso: o
+        // endpoint tem uma latencia so. O trace separa as duas e a soma fica visivel — que e
+        // exatamente o tipo de achado que justifica a fase.
+        var lancamentos = await ConsultarAnoAsync(ano, contaFixaId, incluirNaoFixas, "atual");
+        var lancamentosAnteriores = await ConsultarAnoAsync(ano - 1, contaFixaId, incluirNaoFixas, "anterior");
+
+        activity?.SetTag("dashboard.lancamentos", lancamentos.Count);
+
+        using var calculo = CoreFinanceActivitySource.Instance.StartActivity("Dashboard.Calcular");
 
         var totais = TotalPorMes(lancamentos);
         var totaisAnteriores = TotalPorMes(lancamentosAnteriores);
@@ -54,6 +74,26 @@ public class DashboardService : IDashboardService
             PorConta = DistribuirPorConta(lancamentos),
             TopGastos = SelecionarTopGastos(lancamentos)
         });
+    }
+
+    /// <summary>
+    /// Consulta de um ano com span próprio, para as duas idas ao banco aparecerem separadas.
+    /// </summary>
+    // O span do SqlClient (automatico) fica DENTRO deste: la se ve o SELECT, aqui se ve o que
+    // ele significa no dominio. Instrumentacao automatica diz "houve uma query"; a manual diz
+    // "esta e a consulta do ano anterior, usada so para o comparativo".
+    private async Task<List<Payment>> ConsultarAnoAsync(
+        int ano, Guid? contaFixaId, bool incluirNaoFixas, string papel)
+    {
+        using var activity = CoreFinanceActivitySource.Instance.StartActivity("Dashboard.ConsultarAno");
+        activity?.SetTag("dashboard.ano", ano);
+        activity?.SetTag("dashboard.papel", papel);
+
+        var lancamentos = Filtrar(await _paymentRepository.ObterPorAnoAsync(ano), contaFixaId, incluirNaoFixas);
+
+        activity?.SetTag("dashboard.lancamentos", lancamentos.Count);
+
+        return lancamentos;
     }
 
     private static List<Payment> Filtrar(IEnumerable<Payment> pagamentos, Guid? contaFixaId, bool incluirNaoFixas)

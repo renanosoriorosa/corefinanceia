@@ -1,6 +1,6 @@
 # Configuracao como codigo: o datasource nasce provisionado, entao sobrevive a
 # `docker compose down` sem ninguem reconfigurar nada pela UI.
-# Tempo entra aqui na fase 05; os derivedFields do Loki, na fase 06.
+# Os derivedFields do Loki (log -> trace) entram na fase 06.
 apiVersion: 1
 
 datasources:
@@ -20,3 +20,14 @@ datasources:
       # Precisa ser >= scrape_interval do prometheus.yml. Menor que isso faz o Grafana pedir
       # mais pontos do que existem e o grafico aparece serrilhado.
       timeInterval: 15s
+
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://tempo:3200
+    jsonData:
+      # Desenha o grafo de servicos a partir da arvore de spans. Com uma aplicacao so ele e
+      # modesto, mas e o painel que fica interessante no dia em que existir um segundo servico.
+      nodeGraph:
+        enabled: true

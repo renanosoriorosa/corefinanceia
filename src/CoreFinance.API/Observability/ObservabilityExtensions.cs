@@ -1,8 +1,11 @@
+using CoreFinance.API.Extensions;
 using CoreFinance.API.Health;
 using CoreFinance.Application.Common.Observability;
+using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 namespace CoreFinance.API.Observability;
 
@@ -11,7 +14,8 @@ public static class ObservabilityExtensions
     private const string ServiceNamePadrao = "corefinance-api";
 
     /// <summary>
-    /// Registra as métricas da aplicação e o pipeline do OpenTelemetry (API → OTLP → Collector).
+    /// Registra as métricas e os traces da aplicação e o pipeline do OpenTelemetry
+    /// (API → OTLP → Collector → Prometheus / Tempo).
     /// </summary>
     public static IServiceCollection AddObservability(
         this IServiceCollection services,
@@ -68,10 +72,70 @@ public static class ObservabilityExtensions
                         options.Endpoint = new Uri(otlpEndpoint);
                     }
                 });
+            })
+            .WithTracing(tracing =>
+            {
+                tracing
+                    .AddAspNetCoreInstrumentation(options =>
+                    {
+                        // O /health/live e chamado a cada 30s pelo HEALTHCHECK do Docker, para
+                        // sempre. Sem este filtro, em pouco tempo a maior parte do storage do
+                        // Tempo seria ruido de health check. Mesmo criterio ja aplicado ao log.
+                        options.Filter = contexto =>
+                            !contexto.Request.Path.StartsWithSegments("/health");
+                        options.RecordException = true;
+                    })
+                    .AddHttpClientInstrumentation(options =>
+                        options.FilterHttpRequestMessage = requisicao =>
+                            !EhTelemetriaSaindo(requisicao.RequestUri))
+                    .AddSqlClientInstrumentation(options =>
+                    {
+                        // O texto do SQL (db.query.text) ja vem por padrao nesta versao — nao ha
+                        // mais SetDbStatementForText para ligar. E o que torna o span do banco
+                        // util e, ao mesmo tempo, o que exige atencao: em producao esse texto vai
+                        // para o backend de traces, que aqui nao tem controle de acesso nenhum.
+                        // Os VALORES dos parametros continuam fora, atras de variavel de ambiente
+                        // experimental — e devem continuar assim.
+                        options.RecordException = true;
+
+                        // O readiness sonda o banco a cada 15s pelo publisher, fora de qualquer
+                        // requisicao — entao o span nasce SEM pai e vira um trace inteiro so seu,
+                        // "SELECT", para sempre. Filtrar a rota /health no ASP.NET Core nao pega
+                        // este caso: ele nao passa por rota nenhuma.
+                        options.Filter = comando =>
+                            comando is not SqlCommand consulta
+                            || consulta.CommandText != HealthCheckExtensions.ConsultaDeSaude;
+                    })
+                    // Sem este AddSource a fonte da Application existe, mas ninguem escuta:
+                    // StartActivity devolve null e os spans de dominio simplesmente nao nascem.
+                    .AddSource(CoreFinanceActivitySource.Name);
+
+                tracing.AddOtlpExporter(options =>
+                {
+                    if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+                    {
+                        options.Endpoint = new Uri(otlpEndpoint);
+                    }
+                });
             });
 
         return services;
     }
+
+    /// <summary>
+    /// Identifica as chamadas HTTP que a própria observabilidade faz, para não instrumentá-las.
+    /// </summary>
+    // O sink do Serilog empurra os logs para o Loki por HTTP. Com a instrumentacao de HttpClient
+    // ligada, CADA push vira um trace — e como o sink dispara a cada poucos segundos, para sempre,
+    // o Tempo enche de spans "POST http://loki:3100/loki/api/v1/push" que nao dizem nada sobre a
+    // aplicacao. E o mesmo problema do /health, vindo de outro lado: telemetria observando a si
+    // mesma. O OTLP entra na lista pelo mesmo motivo, para o caso de trocar gRPC por http/protobuf.
+    private static bool EhTelemetriaSaindo(Uri? destino)
+        => destino is not null
+           && (destino.AbsolutePath.StartsWith("/loki/api/", StringComparison.Ordinal)
+               || destino.AbsolutePath.StartsWith("/v1/traces", StringComparison.Ordinal)
+               || destino.AbsolutePath.StartsWith("/v1/metrics", StringComparison.Ordinal)
+               || destino.AbsolutePath.StartsWith("/v1/logs", StringComparison.Ordinal));
 
     /// <summary>
     /// Identidade dos sinais, com <c>OTEL_RESOURCE_ATTRIBUTES</c> tendo a última palavra.

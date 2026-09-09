@@ -2,6 +2,8 @@
 
 > ⬅️ anterior: [04 — Métricas](04-metricas-otel-collector-prometheus.md) · ➡️ próxima: [06 — Correlação](06-correlacao-traceid-logs-traces.md)
 > **Containers novos:** `tempo`.
+> **Status:** ✅ concluída e validada em 2026-09-08. O que a execução mudou em relação ao plano
+> está em [Resultado da execução](#resultado-da-execucao), no fim do documento.
 
 ---
 
@@ -18,12 +20,12 @@ A métrica disse "o P95 é 3 segundos". O trace mostra **em que exatamente** ess
 **Pacotes:**
 
 ```xml
-<PackageReference Include="OpenTelemetry.Instrumentation.SqlClient" Version="1.11.0-beta.*" />
+<PackageReference Include="OpenTelemetry.Instrumentation.SqlClient" Version="1.18.*" />
 ```
 
 Os demais (`Extensions.Hosting`, `Instrumentation.AspNetCore`, `.Http`, `Exporter.OpenTelemetryProtocol`) já entraram na fase 04 e servem métrica **e** trace.
 
-> ⚠️ `Instrumentation.SqlClient` ainda é **beta** — as convenções semânticas de banco no OpenTelemetry mudaram algumas vezes e o pacote acompanha. Para um lab está ótimo; em produção, fixe a versão exata e leia o changelog antes de subir. É bom saber diferenciar "beta porque é instável" de "beta porque a especificação ainda se move" — aqui é o segundo caso.
+> ⚠️ **O plano pedia `1.11.0-beta.*` e dizia que o pacote ainda era beta. Não é mais.** As convenções semânticas de banco estabilizaram e a instrumentação saiu de beta na 1.15. A observação continua valendo como *lição*, só que invertida: a API mudou junto com a especificação e **`SetDbStatementForText` não existe mais** — ver [Resultado da execução](#resultado-da-execucao). Copiar configuração de tutorial escrito na época beta não compila.
 
 **Arquivos novos:**
 
@@ -57,17 +59,23 @@ docker-compose.yml
         options.Filter = ctx => !ctx.Request.Path.StartsWithSegments("/health");
         options.RecordException = true;
     })
-    .AddHttpClientInstrumentation()
+    // Sem este filtro, cada push do Serilog para o Loki vira um trace. Ver "os três ralos
+    // de ruído" no resultado da execução.
+    .AddHttpClientInstrumentation(options =>
+        options.FilterHttpRequestMessage = req => !EhTelemetriaSaindo(req.RequestUri))
     .AddSqlClientInstrumentation(options =>
     {
-        options.SetDbStatementForText = true;   // ver o SQL no span — ver aviso abaixo
+        // db.query.text já vem por padrão — SetDbStatementForText foi removido do pacote
         options.RecordException = true;
+        // a sondagem "SELECT 1;" do readiness roda fora de requisição e viraria trace órfão
+        options.Filter = cmd =>
+            cmd is not SqlCommand c || c.CommandText != HealthCheckExtensions.ConsultaDeSaude;
     })
     .AddSource(CoreFinanceActivitySource.Name)
     .AddOtlpExporter());
 ```
 
-> ⚠️ **`SetDbStatementForText = true` grava o texto do SQL no span.** Num lab é o que torna o trace interessante. Em produção, é um risco: parâmetros e dados de cliente podem ir junto. Saiba o que está ligando.
+> ⚠️ **O texto do SQL vai para o span, e agora sem nada para ligar.** No plano isso era opt-in (`SetDbStatementForText`); na versão estável passou a ser o padrão. O risco não sumiu junto com a opção: em produção esse texto chega ao backend de traces, e o Tempo deste lab não tem controle de acesso. O que continua **fora** por padrão são os *valores* dos parâmetros, atrás de `OTEL_DOTNET_EXPERIMENTAL_SQLCLIENT_ENABLE_TRACE_DB_QUERY_PARAMETERS` — e é onde mora o dado de cliente. Deixe assim.
 
 ### 2. Pipeline de traces no Collector
 
@@ -197,6 +205,10 @@ Activity.Current?.AddException(ex);
 
 Sem isso, uma requisição que retornou 500 aparece no Tempo como um trace comum, sem destaque. Com isso, nasce vermelho e é achável por `{status = error}`.
 
+> ⚠️ **Aqui o `options.RecordException = true` da instrumentação do ASP.NET Core não salva você.** Este middleware **engole** a exceção para devolver o JSON de erro — logo a instrumentação nunca a vê. Quem tem `try/catch` global precisa marcar o span à mão, sempre.
+>
+> 💡 `AddException` é da BCL e chegou no .NET 9, mas funciona neste projeto `net8.0` porque o pacote `System.Diagnostics.DiagnosticSource` (9.x, trazido pelo OpenTelemetry) retropropaga a API. O `RecordException` do `OpenTelemetry.Trace` faz o mesmo e ainda existe — só que marcado `[Obsolete]`, e o build acusa.
+
 ---
 
 ## Como validar
@@ -266,3 +278,130 @@ Confira também: o trace do `/api/dashboard/anual` mostra os spans de SQL do EF 
 - [ ] Spans customizados de `Dashboard.*` aparecem aninhados
 - [ ] `/health/*` **não** gera trace
 - [ ] Tempo sobrevive a restart sem perder os blocos (volume ok)
+
+---
+
+<a id="resultado-da-execucao"></a>
+
+## Resultado da execução (2026-09-08)
+
+### Os três ralos de ruído
+
+O plano previa **um**: o `/health` da rota HTTP. A execução encontrou **três**. Todos produzem trace
+infinito, para sempre, sem ninguém pedir — e nenhum aparece até você olhar `{ }` num ambiente parado.
+
+| Ralo | De onde vem | Como aparecia | Correção |
+|---|---|---|---|
+| `/health/*` pela rota | HEALTHCHECK do Docker, a cada 30 s | trace `GET health/live` | `options.Filter` na instrumentação do ASP.NET Core (previsto no plano) |
+| Push do Serilog para o Loki | sink do Loki, a cada poucos segundos | trace raiz `POST` com `url.full = http://loki:3100/loki/api/v1/push` | `FilterHttpRequestMessage` na instrumentação de HttpClient |
+| Sondagem `SELECT 1;` do readiness | `HealthCheckPublisher`, a cada 15 s | trace raiz **`SELECT`**, órfão | `options.Filter` na instrumentação de SqlClient |
+
+Os dois novos têm a mesma raiz e ela merece nome: **telemetria observando a si mesma**. O sink de log
+usa `HttpClient`, e `HttpClient` está instrumentado; o health check usa `SqlClient`, e `SqlClient`
+está instrumentado. O do banco é o mais traiçoeiro porque **roda fora de qualquer requisição** — o
+span nasce sem pai, então não é um span barulhento dentro de um trace: é um trace inteiro, a cada
+15 s. Filtrar a rota `/health` não pega esse caso, porque ele não passa por rota nenhuma.
+
+Antes da correção, uma janela de 2 minutos com uma única chamada real tinha ~15 traces. Depois:
+
+```text
+5 requisições reais    ->  5 traces
+10 chamadas a /health  ->  0 traces
+```
+
+> 💡 A regra que sai daqui: **depois de ligar tracing, deixe o ambiente parado e consulte `{ }`.**
+> Tudo que aparecer sem você ter feito nada é ruído, e ruído em trace custa storage e atenção para
+> sempre. Este teste leva 30 segundos e o plano não o tinha.
+
+### O trace do `/api/dashboard/anual`
+
+Com o banco aquecido, o endpoint completo:
+
+```text
+GET api/Dashboard/anual                    15,3 ms
+└── Dashboard.ObterAnual                   10,3 ms   {dashboard.ano=2026, dashboard.lancamentos=0}
+    ├── Dashboard.ConsultarAno              5,9 ms   {papel=atual}
+    │   └── SELECT [Payments] …             5,1 ms   ← SqlClient
+    ├── Dashboard.ConsultarAno              4,2 ms   {papel=anterior}
+    │   └── SELECT [Payments] …             3,6 ms   ← SqlClient
+    └── Dashboard.Calcular                  0,1 ms
+```
+
+E aqui a fase entrega o que prometeu, com um resultado **diferente** do que o plano imaginava. O plano
+apostava no `DashboardService` como "cálculo pesado". O trace desmente: `Dashboard.Calcular` é
+**0,1 ms**, e as duas consultas sequenciais são **10,1 dos 10,3 ms** do serviço — praticamente o
+método inteiro. Otimizar o cálculo não renderia nada; paralelizar as duas consultas, ou trazê-las
+numa só, cortaria perto de 40 % da requisição.
+
+Nenhuma métrica diria isso. `http_server_request_duration_seconds` mostra 15 ms e para por aí.
+
+> 💡 **Isso é a fase inteira em um parágrafo.** A métrica te diz *que* está lento; o trace te diz
+> *onde*; e, com alguma frequência, o *onde* contraria o palpite que você teria dado sem ele.
+
+Na primeira chamada (conexão fria) os mesmos spans deram 132 ms, com a primeira consulta em 79,8 ms
+contra 2,9 ms da segunda: o custo de abrir a conexão aparece embutido no primeiro `SELECT`. Vale
+saber para não ler o primeiro trace pós-deploy como se fosse o comportamento normal.
+
+Bônus não planejado: `POST api/Auth/login` levou **1.194 ms**, sem nenhum span de banco explicando o
+tempo. É o BCrypt — trabalho de CPU, invisível para a instrumentação automática porque não é I/O.
+Um span manual no `AuthService` mostraria isso; sem ele, o trace só sabe dizer "o tempo foi gasto
+dentro do controller".
+
+### Nomes e atributos reais
+
+| O que | Valor observado |
+|---|---|
+| Nome do span de banco | `SELECT [Payments] [f].[Id] [f].[Active] …` (vem de `db.query.summary`, não é só `SELECT`) |
+| Atributos do span de banco | `db.system.name`, `db.namespace`, `db.query.text`, `db.query.summary`, `server.address` |
+| Texto da consulta | literais **redigidos**: `SELECT 1;` chega como `SELECT ?;` |
+| Escopo dos spans manuais | `CoreFinance.Application` |
+| Evento de exceção | `exception`, com `exception.type`, `exception.message`, `exception.stacktrace` |
+| Status de erro | `STATUS_CODE_ERROR` + `message` |
+
+> 💡 A redação de literais (`SELECT ?;`) é da convenção semântica nova, e suaviza — sem eliminar — o
+> aviso de segurança do plano. O texto ainda revela estrutura de tabelas e colunas.
+
+### TraceQL que funcionou
+
+Todas verificadas contra a API do Tempo e pelo proxy do Grafana:
+
+```traceql
+{ }                                                  # tudo — use para caçar ruído
+{ duration > 2s }                                    # achou o /api/demo/slow (3.011 ms)
+{ status = error }                                   # achou o /api/demo/error, com a exceção
+{ name = "GET api/Dashboard/anual" }
+{ span.dashboard.ano = 2026 }                        # pelo tag customizado
+{ resource.service.name = "corefinance-api" && duration > 1s }
+```
+
+> ⚠️ **O plano escrevia `{ .service.name = ... }`.** Funciona — o ponto sozinho procura em span *e*
+> resource — mas é ambíguo e mais caro. `service.name` vem do **resource**, então o certo é
+> `resource.service.name`; tags que você mesmo criou são `span.`. Diferente do Prometheus, onde
+> `job` colide (fase 04), aqui o nome do serviço é consultável direto — mas com o prefixo certo.
+
+> ⚠️ **Regex em TraceQL é sintaxe Go dentro de aspas.** `{ name =~ "Dashboard\\..*" }` devolve
+> `invalid char escape`. Escreva `{ name =~ "Dashboard.*" }`.
+
+### Desvios do plano original
+
+| Desvio | Por quê |
+|---|---|
+| `Instrumentation.SqlClient` em `1.18.*`, estável, não `1.11.0-beta.*` | O pacote saiu de beta na 1.15, junto com a estabilização da convenção semântica de banco |
+| `SetDbStatementForText` removido do código | A opção não existe mais na versão estável — `db.query.text` é o padrão. Dá `CS1061` no build |
+| `AddException` em vez de `RecordException` | `RecordException` do `OpenTelemetry.Trace` está `[Obsolete]` na 1.18. `AddException` é BCL do .NET 9, disponível no `net8.0` via `System.Diagnostics.DiagnosticSource` 9.x |
+| Filtro na instrumentação de HttpClient | Push do Serilog → Loki virava trace (ralo 2) |
+| Filtro na instrumentação de SqlClient | Sondagem do readiness virava trace órfão (ralo 3) |
+| `HealthCheckExtensions.ConsultaDeSaude` virou `const` pública | O filtro de tracing e o health check precisam da **mesma** string; duplicar o literal quebraria em silêncio no dia em que um dos dois mudasse |
+| Span extra `Dashboard.ConsultarAno` (um por ano), além de `Dashboard.Calcular` | O plano previa só um span filho, para o cálculo. Sem separar as consultas, as duas idas ao banco ficariam indistinguíveis — e foi justamente essa separação que revelou o achado |
+| `depends_on: [tempo]` no `otel-collector` | Só ordem de partida; evita ruído de conexão recusada no log inicial |
+| Tempo publica só `3200`, não `4317` | Ninguém fora da rede do compose escreve no Tempo — quem escreve é o Collector |
+
+> 💡 **Sobre o `user: "0:0"` do Tempo:** o plano avisava do restart loop por permissão e a precaução
+> foi mantida desde o início. Com ela o container subiu de primeira, então o loop não chegou a ser
+> observado — o aviso segue no plano como precaução aplicada, não como falha reproduzida.
+
+### Pendências herdadas
+
+- **Fase 06:** o Trace ID já está no log (enricher `WithSpan`, da fase 03) e o trace já está no Tempo. Falta o `derivedFields` do datasource Loki para o link ficar clicável nos dois sentidos.
+- **Fase 07:** o painel de traces deve filtrar por `resource.service.name`, não por `.service.name`.
+- **Ideia para a [fase 10](10-extras-e-proximos-passos.md):** span manual no `AuthService` para o BCrypt aparecer — é o exemplo mais didático de "trabalho de CPU que a instrumentação automática não vê".

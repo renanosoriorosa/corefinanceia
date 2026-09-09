@@ -1,6 +1,6 @@
 # Trilha de Observabilidade do CoreFinance — Visão geral
 
-> **Status:** fases [01](01-health-checks.md), [02](02-endpoints-de-demonstracao.md), [03](03-logs-serilog-loki.md) e [04](04-metricas-otel-collector-prometheus.md) concluídas e validadas em 2026-09-05 · fases 05-10 pendentes.
+> **Status:** fases [01](01-health-checks.md), [02](02-endpoints-de-demonstracao.md), [03](03-logs-serilog-loki.md) e [04](04-metricas-otel-collector-prometheus.md) concluídas e validadas em 2026-09-05; fase [05](05-traces-tempo.md) em 2026-09-08 · fases 06-10 pendentes.
 > **Referência:** `observalibidade-dicas.md` (spec original, escrita para um projeto novo).
 > **Adaptação:** aplicar a spec ao CoreFinance que já existe, sem quebrar nada do que está no ar hoje.
 
@@ -88,7 +88,7 @@ A spec original propunha um `observability-lab` do zero. Aqui ela é aplicada ao
 | **grafana** | **3001** | 3000 | ponto de entrada do lab |
 | prometheus | 9090 | 9090 | |
 | loki | 3100 | 3100 | |
-| tempo | 3200 | 3200 | HTTP/consulta |
+| tempo | 3200 | 3200 | HTTP/consulta; o 4317 de escrita fica só na rede interna |
 | otel-collector | 8889 | 4317 / 4318 / 8889 | publica só 8889, para `curl` de depuração |
 
 ### Identificação dos sinais
@@ -129,6 +129,17 @@ level = trace | debug | info | warning | error | critical
 ### Volumes nomeados
 
 `grafana-data`, `prometheus-data`, `loki-data`, `tempo-data`.
+
+### Filtrar telemetria da própria telemetria
+
+Ligar uma instrumentação faz o **próprio** caminho de observabilidade virar sinal. Confirmado na
+[fase 05](05-traces-tempo.md#resultado-da-execucao), onde apareceram três fontes de ruído perpétuo:
+a rota `/health`, o push do Serilog para o Loki (via `HttpClient`) e a sondagem `SELECT 1;` do
+readiness (via `SqlClient`, **fora** de qualquer requisição, logo sem rota para filtrar).
+
+> 💡 **Teste de 30 segundos, depois de ligar qualquer sinal novo:** deixe o ambiente parado, sem
+> tocar em nada, e consulte tudo. O que aparecer é ruído — e ruído não some sozinho, custa storage
+> e atenção para sempre.
 
 ### Imagens fixadas
 
@@ -179,7 +190,7 @@ Cada fase é **executável e validável sozinha**. Não começar a próxima ante
 | ✅ 02 | [Endpoints de demonstração](02-endpoints-de-demonstracao.md) | nenhum | matéria-prima para todas as fases seguintes |
 | ✅ 03 | [Logs: Serilog + Loki](03-logs-serilog-loki.md) | `loki`, `grafana` | "o que aconteceu?" |
 | ✅ 04 | [Métricas: OTel + Collector + Prometheus](04-metricas-otel-collector-prometheus.md) | `otel-collector`, `prometheus` | "quanto, quão rápido, quantos erros?" |
-| 05 | [Traces: Tempo](05-traces-tempo.md) | `tempo` | "onde exatamente está lento?" |
+| ✅ 05 | [Traces: Tempo](05-traces-tempo.md) | `tempo` | "onde exatamente está lento?" |
 | 06 | [Correlação](06-correlacao-traceid-logs-traces.md) | nenhum | amarra log ↔ trace — o coração do lab |
 | 07 | [Dashboard](07-dashboard-grafana.md) | nenhum | uma tela responde "estou saudável agora?" |
 | 08 | [Alertas](08-alertas.md) | nenhum | o sistema avisa você, você não fica olhando |
@@ -241,8 +252,8 @@ A trilha está concluída quando **todos** estiverem marcados:
 - [x] Logs pesquisáveis no Grafana via Loki
 - [x] Métricas expostas pelo Collector e coletadas pelo Prometheus (target `UP`)
 - [ ] Métricas visíveis no Grafana
-- [ ] Traces chegando no Tempo
-- [ ] Traces visíveis e navegáveis no Grafana
+- [x] Traces chegando no Tempo
+- [x] Traces visíveis e navegáveis no Grafana
 - [ ] TraceId de um log abre o trace correspondente (e vice-versa)
 - [ ] Dashboard `ASP.NET Core Observability` provisionado e sobrevivendo a `down`/`up`
 - [ ] 3 alertas configurados e disparando de verdade

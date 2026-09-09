@@ -10,6 +10,12 @@ public static class HealthCheckExtensions
 {
     private const int TimeoutPadraoEmSegundos = 5;
 
+    /// <summary>
+    /// Consulta usada para provar que o SQL Server responde. Pública porque o pipeline de tracing
+    /// precisa reconhecê-la para não transformar cada sondagem em um trace.
+    /// </summary>
+    public const string ConsultaDeSaude = "SELECT 1;";
+
     public static IServiceCollection AddHealthChecksConfig(this IServiceCollection services, IConfiguration configuration)
     {
         var segundos = configuration.GetValue<int?>("HealthChecks:SqlServer:TimeoutEmSegundos")
@@ -24,7 +30,7 @@ public static class HealthCheckExtensions
             .AddSqlServer(
                 connectionString: MontarConnectionStringDeHealthCheck(
                     configuration.GetConnectionString("DefaultConnection")!, segundos),
-                healthQuery: "SELECT 1;",
+                healthQuery: ConsultaDeSaude,
                 name: "sqlserver",
                 failureStatus: HealthStatus.Unhealthy,
                 tags: ["ready", "db"],

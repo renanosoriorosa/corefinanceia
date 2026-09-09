@@ -18,8 +18,8 @@ services:
       # No host o Loki e localhost:3100; aqui dentro da rede do compose e o hostname do servico.
       # Se um sink for inserido antes dele no appsettings, este indice precisa mudar junto.
       Serilog__WriteTo__1__Args__uri: "http://loki:3100"
-      # Sinais OTLP (metricas na fase 04, traces na 05) vao para o Collector, nunca direto
-      # para o backend. Com o profile "obs" desligado o Collector nao existe e o SDK apenas
+      # Sinais OTLP (metricas e traces) vao para o Collector, nunca direto para o backend.
+      # Com o profile "obs" desligado o Collector nao existe e o SDK apenas
       # loga falha de exportacao em backoff — a API continua respondendo. Para calar de vez:
       # Observability__Enabled: "false".
       OTEL_SERVICE_NAME: corefinance-api
@@ -87,6 +87,7 @@ services:
     depends_on:
       - loki
       - prometheus
+      - tempo
     restart: unless-stopped
 
   otel-collector:
@@ -96,12 +97,33 @@ services:
     command: ["--config=/etc/otelcol/config.yml"]
     volumes:
       - ./docker/otel-collector/otel-collector-config.yml:/etc/otelcol/config.yml:ro
+    # O exporter otlp/tempo faz o Collector precisar do Tempo de pe. Nao e dependencia dura (ele
+    # sobe e tenta em retry de qualquer jeito), mas subir na ordem evita ruido no log da partida.
+    depends_on:
+      - tempo
     ports:
       # 4317/4318 ficam publicados pelo mesmo motivo do 3100 do Loki: rodando a API pelo
       # Visual Studio (fora do compose) ela precisa alcancar o Collector pelo localhost.
       - "4317:4317"        # OTLP gRPC
       - "4318:4318"        # OTLP HTTP
       - "8889:8889"        # /metrics, para depuracao com curl
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:2.7.1
+    container_name: corefinance-tempo
+    profiles: ["obs"]
+    # A imagem roda como UID 10001 e nao consegue escrever no volume nomeado, que nasce do root:
+    # o container morre com "permission denied" e entra em restart loop, com a causa escondida no
+    # meio do log. Rodar como root resolve num lab local. O caminho correto em producao e ajustar
+    # o dono do volume (init container ou storage externo), nao elevar o processo.
+    user: "0:0"
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    ports:
+      - "3200:3200"        # HTTP de consulta; o 4317 fica so na rede interna
+    volumes:
+      - ./docker/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo-data:/var/tempo
     restart: unless-stopped
 
   prometheus:
@@ -125,3 +147,4 @@ volumes:
   loki-data:
   grafana-data:
   prometheus-data:
+  tempo-data:
