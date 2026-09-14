@@ -271,13 +271,13 @@ Confira também: o trace do `/api/dashboard/anual` mostra os spans de SQL do EF 
 
 ## Critério de aceite
 
-- [ ] Traces visíveis no Grafana via Tempo
-- [ ] `{ duration > 2s }` encontra o `/api/demo/slow?delay=3000`
-- [ ] `{ status = error }` encontra o `/api/demo/error`, com exceção anexada
-- [ ] O trace de `/api/dashboard/anual` mostra os spans de SQL do EF Core
-- [ ] Spans customizados de `Dashboard.*` aparecem aninhados
-- [ ] `/health/*` **não** gera trace
-- [ ] Tempo sobrevive a restart sem perder os blocos (volume ok)
+- [x] Traces visíveis no Grafana via Tempo
+- [x] `{ duration > 2s }` encontra o `/api/demo/slow?delay=3000`
+- [x] `{ status = error }` encontra o `/api/demo/error`, com exceção anexada
+- [x] O trace de `/api/dashboard/anual` mostra os spans de SQL do EF Core
+- [x] Spans customizados de `Dashboard.*` aparecem aninhados
+- [x] `/health/*` **não** gera trace
+- [ ] Tempo sobrevive a restart sem perder os blocos (volume ok) — **não validado:** a execução não registrou um `docker compose restart tempo` seguido de busca por um trace antigo
 
 ---
 
@@ -402,6 +402,6 @@ Todas verificadas contra a API do Tempo e pelo proxy do Grafana:
 
 ### Pendências herdadas
 
-- **Fase 06:** o Trace ID já está no log (enricher `WithSpan`, da fase 03) e o trace já está no Tempo. Falta o `derivedFields` do datasource Loki para o link ficar clicável nos dois sentidos.
+- ✅ **Fase 06** (resolvida em 2026-09-12): o Trace ID já está no log (enricher `WithSpan`, da fase 03) e o trace já está no Tempo. Falta o `derivedFields` do datasource Loki para o link ficar clicável nos dois sentidos.
 - **Fase 07:** o painel de traces deve filtrar por `resource.service.name`, não por `.service.name`.
 - **Ideia para a [fase 10](10-extras-e-proximos-passos.md):** span manual no `AuthService` para o BCrypt aparecer — é o exemplo mais didático de "trabalho de CPU que a instrumentação automática não vê".

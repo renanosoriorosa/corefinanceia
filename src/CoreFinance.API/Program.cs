@@ -54,6 +54,12 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+// Primeiro middleware da aplicacao de proposito: ele define o contexto (CorrelationId no
+// LogContext, tag no span, header na resposta) que todos os outros vao usar. Se o
+// GlobalExceptionMiddleware viesse antes, o log do erro — justamente o que mais se quer
+// correlacionar — sairia sem CorrelationId.
+app.UseMiddleware<CorrelationIdMiddleware>();
+
 app.UseMiddleware<GlobalExceptionMiddleware>();
 
 // Fica DEPOIS do GlobalExceptionMiddleware de proposito: assim a excecao ainda esta viva quando

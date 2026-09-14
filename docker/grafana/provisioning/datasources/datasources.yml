@@ -1,6 +1,5 @@
 # Configuracao como codigo: o datasource nasce provisionado, entao sobrevive a
 # `docker compose down` sem ninguem reconfigurar nada pela UI.
-# Os derivedFields do Loki (log -> trace) entram na fase 06.
 apiVersion: 1
 
 datasources:
@@ -10,6 +9,21 @@ datasources:
     access: proxy
     url: http://loki:3100
     isDefault: true
+    jsonData:
+      # Log -> trace. O Grafana aplica o regex em cada linha de log e, quando casa, desenha um
+      # botao no detalhe da linha que abre o trace no Tempo. E metade do coracao do laboratorio.
+      derivedFields:
+        - name: TraceID
+          matcherType: regex
+          # Casa com o JSON do CompactJsonFormatter (fase 03). Trocar o formatter quebra isto em
+          # silencio: o botao simplesmente deixa de aparecer. Validar no Explore com
+          # `{app="corefinance-api"} | json | line_format "{{.TraceId}}"`.
+          matcherRegex: '"TraceId":"([a-f0-9]{32})"'
+          # Dois cifroes obrigatorios: o provisioning do Grafana interpola `$` como variavel de
+          # ambiente. Com um cifrao so o link nasce quebrado e nenhum erro e reportado.
+          url: '$${__value.raw}'
+          datasourceUid: tempo
+          urlDisplayLabel: 'Ver trace'
 
   - name: Prometheus
     type: prometheus
@@ -27,6 +41,21 @@ datasources:
     access: proxy
     url: http://tempo:3200
     jsonData:
+      # Trace -> log: o caminho de volta. Cada span ganha o botao "Logs for this span".
+      tracesToLogsV2:
+        datasourceUid: loki
+        # Folga de tempo. O span chega ao Tempo antes de o log chegar ao Loki (o sink manda em
+        # lote). Sem a folga a busca volta vazia e parece que a correlacao nao funciona.
+        spanStartTimeShift: '-5m'
+        spanEndTimeShift: '5m'
+        filterByTraceID: true
+        tags:
+          - key: 'service.name'
+            value: 'app'
+        # A consulta padrao filtra por label; o TraceId nao e label no Loki (seria alta
+        # cardinalidade), e sim campo do JSON — por isso a query e escrita na mao.
+        customQuery: true
+        query: '{app="corefinance-api"} | json | TraceId="$${__span.traceId}"'
       # Desenha o grafo de servicos a partir da arvore de spans. Com uma aplicacao so ele e
       # modesto, mas e o painel que fica interessante no dia em que existir um segundo servico.
       nodeGraph:

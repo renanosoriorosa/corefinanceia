@@ -191,11 +191,15 @@ Cada fase é **executável e validável sozinha**. Não começar a próxima ante
 | ✅ 03 | [Logs: Serilog + Loki](03-logs-serilog-loki.md) | `loki`, `grafana` | "o que aconteceu?" |
 | ✅ 04 | [Métricas: OTel + Collector + Prometheus](04-metricas-otel-collector-prometheus.md) | `otel-collector`, `prometheus` | "quanto, quão rápido, quantos erros?" |
 | ✅ 05 | [Traces: Tempo](05-traces-tempo.md) | `tempo` | "onde exatamente está lento?" |
-| 06 | [Correlação](06-correlacao-traceid-logs-traces.md) | nenhum | amarra log ↔ trace — o coração do lab |
+| ✅ 06 | [Correlação](06-correlacao-traceid-logs-traces.md) | nenhum | amarra log ↔ trace — o coração do lab |
 | 07 | [Dashboard](07-dashboard-grafana.md) | nenhum | uma tela responde "estou saudável agora?" |
 | 08 | [Alertas](08-alertas.md) | nenhum | o sistema avisa você, você não fica olhando |
 | 09 | [Testes e documentação](09-testes-e-documentacao.md) | nenhum | reprodutível do zero |
 | 10 | [Extras](10-extras-e-proximos-passos.md) | opcionais | para depois, se quiser ir mais fundo |
+
+> ⚠️ **Ao validar uma fase que mexeu em C#:** `docker compose --profile obs up -d` reaproveita a
+> imagem já construída e sobe a API **antiga**. Use `--build api`. Custou uma validação inteira na
+> [fase 06](06-correlacao-traceid-logs-traces.md#resultado-da-execucao).
 
 > 💡 **Dica:** a ordem não é arbitrária. Ela vai do sinal mais barato (health = um endpoint) ao mais caro (traces = SDK + backend + storage), e cada fase produz algo que a próxima consome. Logs antes de métricas porque log é o sinal que você já sabe ler; métricas antes de traces porque a métrica te diz *que* tem problema e o trace te diz *onde*.
 

@@ -219,9 +219,119 @@ curl -i -H "X-Correlation-Id: teste-manual-001" http://localhost:5176/api/demo/e
 
 ## Critério de aceite
 
-- [ ] Todo log de requisição traz `TraceId`, `SpanId` e `CorrelationId` preenchidos
-- [ ] `X-Correlation-Id` enviado pelo cliente é honrado e devolvido na resposta
-- [ ] Sem header, o `TraceId` é adotado como correlation id
-- [ ] Do log, o botão **Ver trace** abre o trace correto
-- [ ] Do span, **Logs for this span** traz os logs daquela requisição
-- [ ] O fluxo métrica → trace → log → causa foi percorrido de ponta a ponta
+- [x] Todo log de requisição traz `TraceId`, `SpanId` e `CorrelationId` preenchidos
+- [x] `X-Correlation-Id` enviado pelo cliente é honrado e devolvido na resposta — e id inválido cai no `TraceId`
+- [x] Sem header, o `TraceId` é adotado como correlation id
+- [x] Do log, o botão **Ver trace** abre o trace correto — conferido pela API do Loki/Tempo, com o `matcherRegex` e o `$$` validados no lado do Grafana
+- [x] Do span, **Logs for this span** traz os logs daquela requisição — conferido executando a `query` do `tracesToLogsV2`
+- [x] O fluxo métrica → trace → log → causa foi percorrido de ponta a ponta
+
+---
+
+<a id="resultado-da-execucao"></a>
+
+## Resultado da execução (2026-09-12)
+
+### O que entrou
+
+| Arquivo | O que mudou |
+|---|---|
+| `src/CoreFinance.API/Middlewares/CorrelationIdMiddleware.cs` | novo — define o id, marca o span, devolve o header, empurra para o `LogContext` |
+| `src/CoreFinance.API/Program.cs` | `UseMiddleware<CorrelationIdMiddleware>()` como **primeiro** middleware da aplicação |
+| `docker/grafana/provisioning/datasources/datasources.yml` | `derivedFields` no Loki (log → trace) e `tracesToLogsV2` no Tempo (trace → log) |
+
+Nenhum pacote novo, nenhum container novo — exatamente como o plano previa.
+
+### Desvio do plano: o id de fora é entrada não confiável
+
+O plano usa o header do cliente direto:
+
+```csharp
+var correlationId = context.Request.Headers[HeaderName].FirstOrDefault() ?? ...
+```
+
+Esse valor vai parar em **três** lugares que não são texto livre: uma tag de span, uma propriedade
+de log estruturado e um header de resposta. Um `X-Correlation-Id` com quebra de linha, aspas ou 4 KB
+de lixo é log poluído no melhor caso e linha de log forjada no Loki no pior. A execução acrescentou
+uma validação mínima — até 64 caracteres, só `[A-Za-z0-9-_.:]` — e quem manda algo fora disso
+simplesmente cai no `TraceId`, sem erro e sem requisição rejeitada. `teste-manual-001` passa; o lixo
+não. É a mesma decisão que já tinha sido tomada no log: nunca confiar no que veio de fora só porque
+é conveniente.
+
+### A ordem confirmada na prática
+
+Com o `CorrelationIdMiddleware` por fora de tudo, os **dois** logs de um 500 saem correlacionados —
+o do `UseSerilogRequestLogging` e o do `GlobalExceptionMiddleware`:
+
+```json
+{"@mt":"HTTP {RequestMethod} {RequestPath} respondeu {StatusCode} em {Elapsed:0.0000} ms",
+ "@l":"Error","@tr":"6808c059b09097eb5dcf83997e562e33","@sp":"73d0aea4fe66e715",
+ "RequestPath":"/api/demo/error","StatusCode":500,
+ "CorrelationId":"teste-manual-001","SpanId":"73d0aea4fe66e715",
+ "TraceId":"6808c059b09097eb5dcf83997e562e33"}
+
+{"@mt":"Erro não tratado: {Message}","@l":"Error",
+ "SourceContext":"CoreFinance.API.Middlewares.GlobalExceptionMiddleware",
+ "CorrelationId":"teste-manual-001","SpanId":"73d0aea4fe66e715",
+ "TraceId":"6808c059b09097eb5dcf83997e562e33"}
+```
+
+`ParentId` vem `0000000000000000` em todos eles: o trace nasce na API porque o `web` ainda não
+repassa `traceparent` (previsto na [fase 10](10-extras-e-proximos-passos.md)).
+
+### Validado sem a stack
+
+O Docker Desktop estava desligado na execução, então a API subiu direto (`dotnet run`) com o console
+usando o mesmo `CompactJsonFormatter` que o sink do Loki usa — o que torna a linha do console
+idêntica, em forma, à que chega ao Loki:
+
+| Cenário | Resultado |
+|---|---|
+| `curl -H "X-Correlation-Id: teste-manual-001" /api/demo/error` | header volta com o mesmo valor; os dois logs do erro trazem `CorrelationId=teste-manual-001` |
+| `curl /api/demo/success` (sem header) | `CorrelationId` = `TraceId` = `bfc48794f585c2452689019394d64966` — o `TraceId` foi adotado |
+| `curl -H "X-Correlation-Id: lixo com espaço e \" aspas"` | id rejeitado, `TraceId` adotado, requisição respondida normalmente |
+| regex do `derivedField` contra as linhas reais | `"TraceId":"[a-f0-9]{32}"` casou em **todas** as linhas de requisição |
+
+O último item é o que costuma quebrar em silêncio, e é o que dá para conferir sem Grafana: se o
+regex casa no JSON que a aplicação produz hoje, o botão **Ver trace** tem do que se alimentar.
+
+### Validado com a stack no ar (2026-09-12)
+
+`docker compose --profile obs up -d` **não** basta: o compose reaproveita a imagem já construída e
+a API subiu sem o middleware novo — o `X-Correlation-Id` simplesmente não voltava. `--build api`
+resolve. Vale para toda fase que mexe em código C#.
+
+Os quatro fluxos foram percorridos pela API do Grafana/Loki/Tempo/Prometheus, que é o mesmo caminho
+que os botões da UI usam por baixo:
+
+| Fluxo | Como foi conferido | Resultado |
+|---|---|---|
+| **A** log → trace | `{app="corefinance-api"} \| json \| CorrelationId="teste-manual-001"` | 3 logs, todos com `TraceId=33bd3c1a…`; o `matcherRegex` do derivedField casou nas 3 linhas cruas |
+| **A** (destino) | `GET /api/traces/33bd3c1a…` no Tempo | span `GET api/Demo/error`, `STATUS_CODE_ERROR`, tag `correlation.id = teste-manual-001` e evento `exception` |
+| **B** trace → log | a `query` do `tracesToLogsV2`, com o traceId no lugar da variável | exatamente os 3 logs daquela requisição, e só dela |
+| **C** métrica → causa | `increase(http_server_request_duration_seconds_count{...500}[5m])` → `{ status = error }` → span → logs do trace | 5,3 req/5m em `api/Demo/error` → trace → `System.InvalidOperationException: Erro proposital…` |
+| **D** sem header | `RequestPath="/api/demo/success"` | `CorrelationId == TraceId == 12b62415…`, o mesmo valor que voltou no header |
+
+### O `$$` sobreviveu — conferido no lado do Grafana
+
+A armadilha dos dois cifrões só se revela depois que o Grafana lê o arquivo. O que ele guardou:
+
+```json
+"url": "${__value.raw}"
+"query": "{app=\"corefinance-api\"} | json | TraceId=\"${__span.traceId}\""
+```
+
+Um cifrão de cada, que é a forma que o runtime interpola. Se o provisioning tivesse `$` simples, o
+que apareceria aqui seria a variável **já resolvida como vazia** — e o botão existiria, clicável,
+levando a lugar nenhum.
+
+### A busca vazia de trinta segundos
+
+Na primeira tentativa, segundos depois da requisição, **tanto** o filtro por `TraceId` no Loki
+quanto o `{ span.correlation.id = "…" }` no Tempo voltaram vazios — enquanto buscar o trace pelo id
+direto (`/api/traces/<id>`) já funcionava. Minutos depois, as mesmas consultas devolveram tudo.
+
+É a mesma defasagem que motiva o `spanStartTimeShift`/`spanEndTimeShift`, vista de outro ângulo:
+buscar por atributo depende de dado já indexado, ler por id não. Quem valida a correlação no
+instante seguinte ao request conclui que ela não funciona — e mexe no que estava certo. Esperar um
+pouco e alargar a janela de tempo é parte do teste, não impaciência.
