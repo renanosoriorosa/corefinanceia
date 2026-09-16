@@ -1,0 +1,21 @@
+# Dashboard as code: o painel nasce provisionado junto com o Grafana e sobrevive a
+# `docker compose down`. O caminho aqui dentro e o volume montado no compose
+# (./docker/grafana/dashboards -> /var/lib/grafana/dashboards), nao uma pasta do host.
+apiVersion: 1
+
+providers:
+  - name: CoreFinance
+    orgId: 1
+    folder: CoreFinance
+    type: file
+    # false: apagar pela UI e possivel, mas o arquivo volta no proximo ciclo — o arquivo
+    # continua sendo a fonte da verdade.
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    # Permite editar e salvar pela UI sem o provisioning reverter a cada 30s. O preco e que a
+    # edicao NAO volta para o arquivo: ela vive no banco do Grafana e morre no `down -v`.
+    # O fluxo correto continua sendo montar na UI, exportar o JSON e commitar.
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

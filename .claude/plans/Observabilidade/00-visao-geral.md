@@ -259,7 +259,7 @@ A trilha está concluída quando **todos** estiverem marcados:
 - [x] Traces chegando no Tempo
 - [x] Traces visíveis e navegáveis no Grafana
 - [ ] TraceId de um log abre o trace correspondente (e vice-versa)
-- [ ] Dashboard `ASP.NET Core Observability` provisionado e sobrevivendo a `down`/`up`
+- [x] Dashboard `ASP.NET Core Observability` provisionado e sobrevivendo a `down`/`up`
 - [ ] 3 alertas configurados e disparando de verdade
 - [x] Cenários de erro reproduzíveis por query string
 - [x] Cenários de latência reproduzíveis por query string

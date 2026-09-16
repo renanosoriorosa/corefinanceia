@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using CoreFinance.Application.Common.Observability;
 
@@ -24,6 +25,15 @@ public sealed class AppMetrics : IAppMetrics, IDisposable
     private double? _saudeGeral;
     private IReadOnlyList<KeyValuePair<string, double>> _saudePorCheck = [];
 
+    // Estado da conta de CPU: utilizacao so existe entre DUAS leituras, entao o instrumento
+    // precisa lembrar onde estava na anterior. Mesmo motivo do lock acima — quem coleta e uma
+    // thread do OpenTelemetry, e duas coletas concorrentes embaralhariam o delta.
+    private readonly Process _processo = Process.GetCurrentProcess();
+    private readonly object _travaCpu = new();
+    private TimeSpan _cpuAcumuladaAnterior;
+    private long _timestampAnterior;
+    private double _utilizacaoCpu;
+
     public AppMetrics()
     {
         _meter = new Meter(MeterName, "1.0.0");
@@ -41,6 +51,19 @@ public sealed class AppMetrics : IAppMetrics, IDisposable
             observeValues: LerSaudeGeral,
             unit: "{status}",
             description: "Saude agregada da API: 1 saudavel, 0.5 degradada, 0 fora.");
+
+        // CPU nao vem de graca: a Instrumentation.Runtime nao publica utilizacao, e o pacote
+        // OpenTelemetry.Instrumentation.Process, que publicaria, nunca saiu de pre-release —
+        // e este projeto so usa OTel estavel. Entao a conta e feita aqui, e ela e a definicao
+        // de utilizacao: tempo de CPU consumido / (tempo de relogio x nucleos disponiveis).
+        _cpuAcumuladaAnterior = _processo.TotalProcessorTime;
+        _timestampAnterior = Stopwatch.GetTimestamp();
+
+        _meter.CreateObservableGauge(
+            name: "corefinance.process.cpu.utilization",
+            observeValue: LerUsoDeCpu,
+            unit: "1",
+            description: "Fracao de CPU usada pelo processo: 1 = todos os nucleos saturados.");
 
         _meter.CreateObservableGauge(
             name: "corefinance.health.check.status",
@@ -89,5 +112,41 @@ public sealed class AppMetrics : IAppMetrics, IDisposable
         }
     }
 
-    public void Dispose() => _meter.Dispose();
+    // Utilizacao e sempre uma media sobre um intervalo — aqui, o intervalo entre esta coleta e
+    // a anterior (OTEL_METRIC_EXPORT_INTERVAL, 15s no compose). Nao existe "uso de CPU agora".
+    private double LerUsoDeCpu()
+    {
+        lock (_travaCpu)
+        {
+            var agora = Stopwatch.GetTimestamp();
+            var decorrido = Stopwatch.GetElapsedTime(_timestampAnterior, agora);
+
+            // Duas coletas quase coladas (um segundo reader, ou um scrape manual no meio do
+            // ciclo) dividiriam por um intervalo minusculo e desenhariam um pico que nunca
+            // existiu. Abaixo de um segundo, repete o ultimo valor em vez de inventar um.
+            if (decorrido < TimeSpan.FromSeconds(1))
+            {
+                return _utilizacaoCpu;
+            }
+
+            _processo.Refresh();
+            var cpuAcumulada = _processo.TotalProcessorTime;
+
+            // ProcessorCount respeita o limite de CPU do container, nao o da maquina — entao o
+            // 1.0 aqui significa "saturei o que me deram", que e a leitura que interessa.
+            _utilizacaoCpu = (cpuAcumulada - _cpuAcumuladaAnterior).TotalSeconds
+                / (decorrido.TotalSeconds * Environment.ProcessorCount);
+
+            _cpuAcumuladaAnterior = cpuAcumulada;
+            _timestampAnterior = agora;
+
+            return _utilizacaoCpu;
+        }
+    }
+
+    public void Dispose()
+    {
+        _meter.Dispose();
+        _processo.Dispose();
+    }
 }

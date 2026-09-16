@@ -1,7 +1,7 @@
 # Fase 07 — Dashboard consolidado no Grafana
 
 > ⬅️ anterior: [06 — Correlação](06-correlacao-traceid-logs-traces.md) · ➡️ próxima: [08 — Alertas](08-alertas.md)
-> **Containers novos:** nenhum. Só provisioning e JSON.
+> **Containers novos:** nenhum. Provisioning, JSON — e uma métrica nova na aplicação (ver [Resultado da execução](#resultado-da-execucao)).
 
 ---
 
@@ -147,10 +147,84 @@ docker compose --profile obs up -d
 
 ## Critério de aceite
 
-- [ ] Dashboard `ASP.NET Core Observability` aparece provisionado, na pasta CoreFinance
-- [ ] Faixa 1 responde "estou saudável?" sem rolar a tela
-- [ ] Requests, erros, latência (média/P95/P99), runtime e logs — todos com dados
-- [ ] Limiares coloridos configurados nos stats
-- [ ] O painel de logs abre o trace pelo TraceID
-- [ ] Sobrevive a `down` + `up` sem intervenção manual
-- [ ] JSON versionado no repositório, com `uid` fixo e sem `id`
+- [x] Dashboard `ASP.NET Core Observability` aparece provisionado, na pasta CoreFinance
+- [x] Faixa 1 responde "estou saudável?" sem rolar a tela
+- [x] Requests, erros, latência (média/P95/P99), runtime e logs — todos com dados
+- [x] Limiares coloridos configurados nos stats
+- [x] O painel de logs abre o trace pelo TraceID
+- [x] Sobrevive a `down` + `up` sem intervenção manual
+- [x] JSON versionado no repositório, com `uid` fixo e sem `id`
+
+---
+
+<a id="resultado-da-execucao"></a>
+
+## Resultado da execução (2026-09-16)
+
+### 1. A faixa 4 pediu uma métrica que não existia
+
+O plano lista **CPU** na faixa 4. Ela não estava no inventário da [fase 04](04-metricas-otel-collector-prometheus.md#resultado-da-execucao) por um motivo simples: a `OpenTelemetry.Instrumentation.Runtime` **não publica CPU**. Quem publicaria é a `OpenTelemetry.Instrumentation.Process` — e ela nunca saiu de pré-release (a lista do NuGet vai de `0.1.0-alpha.1` a `1.18.0-rc.1`, sem uma única versão estável). Como este projeto só usa OTel estável, o painel teria que ser cortado ou a métrica teria que ser nossa.
+
+Ela virou nossa, em `AppMetrics.cs`, e a conta é a própria definição de utilização:
+
+```text
+tempo de CPU consumido no intervalo / (tempo de relógio × núcleos disponíveis)
+```
+
+O que isso ensina, e que um pacote pronto teria escondido: **utilização é sempre uma média sobre um intervalo**. Não existe "uso de CPU agora" — existe "uso de CPU entre duas coletas" (aqui, os 15 s do `OTEL_METRIC_EXPORT_INTERVAL`). O `Environment.ProcessorCount` respeita o limite de CPU do container, então `1.0` significa "saturei o que me deram", não "saturei a máquina".
+
+**Conferência contra o `docker stats`**, no cenário `erro` a 1441 req/s:
+
+| Fonte | Leitura |
+|---|---|
+| `docker stats` | `CPU=343.03%` → 3,43 núcleos |
+| nossa métrica | `max_over_time(...[3m])` = `0,2537` × 12 núcleos = 3,04 núcleos |
+
+Diferença compatível com janelas de amostragem diferentes — a métrica está certa.
+
+### 2. O nome exportado não foi o nome registrado
+
+Registrado no código como `corefinance.process.cpu.utilization` com unidade `"1"`. No `/metrics` do Collector:
+
+```text
+corefinance_process_cpu_utilization_ratio
+```
+
+O exportador **acrescentou `_ratio`** por causa da unidade `1` — do mesmo jeito que `{status}` e `{payment}` são anotações e somem. É a regra de ouro da fase 04 cobrando de novo: o nome se lê do `/metrics`, não se deduz do código.
+
+### 3. Faixa 4 reorganizada
+
+Cinco gráficos não cabem em uma linha de 24 colunas sem ficarem estreitos demais. A faixa virou duas linhas antes do painel de logs:
+
+```text
+y=24   CPU (8) | Memória gerenciada (8) | GC por geração (8)
+y=31   Thread pool (12) | Exceções e contenção (12)
+y=38   Logs recentes (24)
+```
+
+### 4. As sete validações
+
+| # | Validação | Resultado |
+|---|---|---|
+| 1 | Dashboard provisionado na pasta CoreFinance | `/api/search` → `folderTitle: CoreFinance`, `uid: corefinance-obs` |
+| 2 | Nenhum painel sem dado | **21 alvos de 15 painéis, todos com série** (Prometheus + Loki consultados direto) |
+| 3 | Cenário `erro` deixa o stat vermelho | 129.674 req em 90 s, 100 % HTTP 500 → taxa de erro `100` no `[1m]`, acima do limiar vermelho (5) |
+| 4 | Cenário `lento` abre P95 vs média | ver tabela abaixo |
+| 5 | SQL parado → `UNHEALTHY` | `corefinance_health_status = 0` e `health_check="sqlserver" = 0` (com `self = 1`); depois do `docker start`, os dois voltam a `1` |
+| 6 | Log de erro → TraceID → trace | regex do derived field casou na linha `level="error"`; o TraceID `325a11dd…c52399` devolveu no Tempo um span `GET api/Demo/random` com `STATUS_CODE_ERROR` |
+| 7 | `down` + `up` | dashboard de volta sozinho, 15 painéis, 4 variáveis, `provisionedExternalId: corefinance-observability.json` |
+
+**Validação 4, o painel mais didático da fase, com números.** O cenário `lento` foi rodado *junto* com o `misto` — poucas requisições de 3 s no meio de muitas rápidas, que é o caso real:
+
+| Janela `[2m]` | Média | P95 | P99 | P95/média |
+|---|---|---|---|---|
+| só `misto` (28 req/s) | 133 ms | 480 ms | 2.122 ms | 3,6× |
+| `misto` + `lento` (1,3 req/s de 3 s) | 276 ms | 2.346 ms | 4.453 ms | **8,5×** |
+
+1,3 req/s lentas em 28 req/s **dobraram a média e quintuplicaram o P95**. É a demonstração de que a média esconde a cauda — e ela está visível no gráfico da faixa 3 sem precisar de explicação.
+
+### 5. Duas surpresas que ficam registradas
+
+> ⚠️ **`provisioned: false` num dashboard provisionado.** O `/api/dashboards/uid/...` devolve `meta.provisioned = false` mesmo com o dashboard vindo do arquivo. É efeito do `allowUiUpdates: true`: o Grafana destrava a edição pela UI e, com isso, deixa de marcar o dashboard como provisionado. Quem confirma a origem é o `meta.provisionedExternalId`, que continua apontando para o `corefinance-observability.json`. Procurar pela flag errada faz parecer que o provisioning falhou.
+
+> ⚠️ **Depois de um `down`/`up`, os painéis de runtime desenham duas linhas.** As métricas de runtime e de saúde são consultadas sem agregação, então há **uma série por `service_instance_id`** — e o `service.instance.id` muda a cada partida da API. Durante os ~5 min em que a instância antiga ainda está dentro da janela de consulta, convivem as duas. Some sozinho. Vale saber por quê: o stat de *Saúde* nesse intervalo mostra dois valores, não um.
