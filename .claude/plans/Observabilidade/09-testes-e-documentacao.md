@@ -196,11 +196,112 @@ curl http://localhost:3000
 
 ---
 
+## Resultado da execução (2026-09-17)
+
+### 1. Os 7 testes, com número
+
+| # | Teste | Resultado |
+|---|---|---|
+| 1 | Health | `Healthy` nos três endpoints, HTTP 200, sem token. `/health` em **6,3 ms** (`self` 0,0003 ms, `sqlserver` 3,0 ms) |
+| 2 | Logs | duas linhas `level="error"` no Loki em segundos, com stack trace apontando `DemoController.cs:line 57`, `TraceId`, `CorrelationId=fase09-teste02` e `StatusCode=500` |
+| 3 | Métricas | `volume`, 60 s, 8 em paralelo: **120.972 req**, 100 % HTTP 200, **2.016 req/s**. Target `otel-collector:8889` `up` |
+| 4 | Latência | `misto` + `lento` simultâneos: **média 235 ms × P95 1,84 s × P99 4,22 s** |
+| 5 | Tracing | `{ duration > 2s }` devolveu 3 traces `GET api/Demo/slow` de 3.000–3.001 ms |
+| 6 | Correlação | `TraceId` do log abriu o trace no Tempo; derived field e `tracesToLogsV2` conferidos no datasource |
+| 7 | Alertas | `inactive` → `pending` (11:09:36) → `firing` (11:10:37) → `inactive` sozinho (11:17:14) |
+
+### 2. O teste 4 precisou de dois geradores ao mesmo tempo
+
+O enunciado do teste manda rodar só `-Cenario lento` e reparar que "o P95 dispara e a média sobe
+pouco". **Com o cenário `lento` puro isso não acontece** — se toda requisição leva 3 s, média e
+P95 coincidem (medido no cliente: média 3.006 ms, P95 3.010 ms). É a mesma ressalva registrada na
+[fase 08](08-alertas.md#resultado-da-execucao), agora com o teste refeito do jeito que prova o
+ponto: `misto` e `lento` em paralelo por 240 s.
+
+| Medida | Valor |
+|---|---|
+| Requisições/s | 31,0 |
+| **Média** | **235 ms** |
+| **P95** | **1,84 s** |
+| P99 | 4,22 s |
+| Taxa de erro | 4,7 % |
+
+**1,3 req/s levando 3 s empurraram o P95 para quase 2 s com a média em 235 ms.** É o usuário que
+reclama e o gráfico que não mostra.
+
+> ⚠️ **Rajada curta esconde o incidente no `rate([5m])`.** Logo depois dos 60 s do teste de volume,
+> o P95 global marcava **4,7 ms** mesmo com 160 requisições de 3 s já contabilizadas: 120.972
+> requisições rápidas na mesma janela diluíram tudo. Quebrando por rota, o número aparecia na hora
+> — `api/Demo/slow` = **4,875 s** contra `api/Demo/success` = 4,7 ms. *Quando o agregado não
+> mostra, quebre por dimensão.*
+
+> 💡 **4,875 s para requisições de 3 s não é erro de medida, é o bucket.** `histogram_quantile`
+> interpola linearmente dentro do bucket em que o percentil cai — com 3 s dentro da faixa
+> `(2,5 s – 5 s]`, sai 4,875 s. Histograma responde faixa, não valor exato; para o valor exato,
+> o trace.
+
+### 3. O cenário de dependência fora do ar acendeu os três alertas
+
+Foi o mais rico, como o plano previa — e mais do que o previsto: **um único `docker stop` levou as
+três regras a `firing`**.
+
+| Horário | Evento |
+|---|---|
+| 11:17:48 | `docker stop sqlserver_container` |
+| 11:17:49 | `/health/ready` → **503**, com a mensagem do TCP Provider no JSON; `/health/live` segue `Healthy` |
+| 11:19:29 | `POST /api/auth/login` → **500 em 14.587 ms** (timeout de conexão) |
+| 11:19:35 | `corefinance_health_status` = 0 · **Application Unhealthy** `firing` |
+| 11:21:08 | **High Error Rate** `firing` |
+| 11:22:09 | **High Latency** `firing` |
+| 11:22:17 | `docker start sqlserver_container` |
+| 11:22:55 | métrica de saúde de volta a 1 (38 s) |
+| 11:23:10 | **Application Unhealthy** → `Normal` (53 s) |
+| 11:25:38 | os outros dois → `Normal`, sozinhos (a janela `[5m]` esvaziando) |
+
+> ⚠️ **Dependência fora do ar não produz span de SQL.** A falha acontece ao **abrir a conexão**, e
+> a instrumentação do `SqlClient` só cria span para comando executado. O trace de `POST api/Auth/login`
+> tem **um span só**, de 14.591 ms e `STATUS_CODE_ERROR`, com a mensagem do SQL Server no status.
+> Quem procura o filho vermelho na árvore para provar que o banco caiu não acha nada e conclui a
+> coisa errada.
+
+> 💡 **Dependência morta vira incidente de latência, não só de erro.** Um login de ~100 ms virou
+> 14,6 s por causa do timeout de conexão — e foi isso, sem carga nenhuma rodando, que disparou o
+> alerta de latência. Ler o incidente só pela taxa de erro teria contado metade da história.
+
+### 4. Reprodutibilidade: passou
+
+`down -v` (os quatro volumes removidos) + `up -d --build` + `gerar-carga.ps1 -Duracao 120`.
+Voltaram sozinhos: os 3 datasources, o dashboard `corefinance-obs` na pasta `CoreFinance`, as 3
+regras, o contact point `lab-local`, o target `up` no Prometheus e os três sinais fluindo
+(1.542 linhas de log em 2 min · 19,9 req/s · P95 772 ms · taxa de erro 5,03 % · traces com
+`{ status = error }`). A correlação log → trace foi conferida de novo, com `STATUS_CODE_ERROR`.
+
+E sem observabilidade nenhuma (`down` do profile + `docker compose up -d`): API **saudável em 6 s**,
+`/health/live` em 2,3 ms, web em 72 ms, `/api/demo/success` entre 2 e 35 ms. O único efeito é ruído
+no console do sink do Loki (`Name or service not known (loki:3100)`), que **não afeta requisição
+nenhuma**. O objetivo da trilha inteira — observabilidade como preocupação opcional — se sustentou.
+
+### 5. Duas correções ao enunciado do plano
+
+> ⚠️ **`-Cenario sucesso` não existe.** Os cenários do `gerar-carga.ps1` são `misto`, `erro`,
+> `lento` e `volume`. O equivalente a "sucesso" é `volume`, que bate em `/api/demo/success`.
+
+> ⚠️ **"Os 4 datasources" são 3.** Loki, Prometheus e Tempo. Não existe um quarto nesta
+> implementação — o número veio da spec original.
+
+### 6. O que ficou de fora
+
+**Print dos painéis.** O Grafana deste lab não tem o plugin `grafana-image-renderer`, então não há
+como exportar PNG do dashboard por linha de comando. A validação dos painéis com dado real está na
+[fase 07](07-dashboard-grafana.md#resultado-da-execucao) (21 alvos de 15 painéis, todos com série).
+
+---
+
 ## Critério de aceite
 
-- [ ] Os 7 testes executados e com resultado registrado
-- [ ] Os 5 cenários de falha reproduzidos e observados
-- [ ] `docs/OBSERVABILIDADE.md` completo, com os 12 pontos + troubleshooting + decisões
-- [ ] `down -v` seguido de `up` recria tudo sem intervenção manual
-- [ ] `docker compose up -d` sem o profile continua funcionando normalmente
-- [ ] Checklist final de [00 — Visão geral](00-visao-geral.md) totalmente marcado
+- [x] Os 7 testes executados e com resultado registrado
+- [x] Os 5 cenários de falha reproduzidos e observados
+- [x] `docs/OBSERVABILIDADE.md` completo, com os 12 pontos + troubleshooting + decisões
+- [x] `down -v` seguido de `up` recria tudo sem intervenção manual
+- [x] `docker compose up -d` sem o profile continua funcionando normalmente
+- [x] Checklist final de [00 — Visão geral](00-visao-geral.md) totalmente marcado

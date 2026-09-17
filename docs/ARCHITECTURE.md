@@ -101,3 +101,16 @@ web/
 - Codigo todo em Portugues claro
 - Codigo simples e objetivos
 - Siga o SOLID
+
+---
+
+# Observabilidade
+
+Health checks, logs (Serilog + Loki), métricas (OpenTelemetry + Collector + Prometheus),
+traces (Tempo), dashboard e alertas no Grafana.
+
+Toda a stack sobe atrás do profile `obs` do Docker Compose e é **opcional**: `docker compose up -d`
+continua subindo só `api` + `web`.
+
+- Guia completo: [docs/OBSERVABILIDADE.md](OBSERVABILIDADE.md)
+- Grafana: http://localhost:3001 (⚠️ 3001, não 3000)

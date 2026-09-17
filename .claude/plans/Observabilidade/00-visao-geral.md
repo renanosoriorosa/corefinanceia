@@ -1,6 +1,6 @@
 # Trilha de Observabilidade do CoreFinance — Visão geral
 
-> **Status:** fases [01](01-health-checks.md), [02](02-endpoints-de-demonstracao.md), [03](03-logs-serilog-loki.md) e [04](04-metricas-otel-collector-prometheus.md) concluídas e validadas em 2026-09-05; fase [05](05-traces-tempo.md) em 2026-09-08; fases [06](06-correlacao-traceid-logs-traces.md), [07](07-dashboard-grafana.md) e [08](08-alertas.md) em 2026-09-16 · fases 09-10 pendentes.
+> **Status:** fases [01](01-health-checks.md), [02](02-endpoints-de-demonstracao.md), [03](03-logs-serilog-loki.md) e [04](04-metricas-otel-collector-prometheus.md) concluídas e validadas em 2026-09-05; fase [05](05-traces-tempo.md) em 2026-09-08; fases [06](06-correlacao-traceid-logs-traces.md), [07](07-dashboard-grafana.md) e [08](08-alertas.md) em 2026-09-16; fase [09](09-testes-e-documentacao.md) em 2026-09-17 · **checklist de aceite fechado**, com [`docs/OBSERVABILIDADE.md`](../../docs/OBSERVABILIDADE.md) como guia do laboratório · fase [10](10-extras-e-proximos-passos.md) é opcional.
 > **Referência:** `observalibidade-dicas.md` (spec original, escrita para um projeto novo).
 > **Adaptação:** aplicar a spec ao CoreFinance que já existe, sem quebrar nada do que está no ar hoje.
 
@@ -192,9 +192,9 @@ Cada fase é **executável e validável sozinha**. Não começar a próxima ante
 | ✅ 04 | [Métricas: OTel + Collector + Prometheus](04-metricas-otel-collector-prometheus.md) | `otel-collector`, `prometheus` | "quanto, quão rápido, quantos erros?" |
 | ✅ 05 | [Traces: Tempo](05-traces-tempo.md) | `tempo` | "onde exatamente está lento?" |
 | ✅ 06 | [Correlação](06-correlacao-traceid-logs-traces.md) | nenhum | amarra log ↔ trace — o coração do lab |
-| 07 | [Dashboard](07-dashboard-grafana.md) | nenhum | uma tela responde "estou saudável agora?" |
-| 08 | [Alertas](08-alertas.md) | nenhum | o sistema avisa você, você não fica olhando |
-| 09 | [Testes e documentação](09-testes-e-documentacao.md) | nenhum | reprodutível do zero |
+| ✅ 07 | [Dashboard](07-dashboard-grafana.md) | nenhum | uma tela responde "estou saudável agora?" |
+| ✅ 08 | [Alertas](08-alertas.md) | nenhum | o sistema avisa você, você não fica olhando |
+| ✅ 09 | [Testes e documentação](09-testes-e-documentacao.md) | nenhum | reprodutível do zero |
 | 10 | [Extras](10-extras-e-proximos-passos.md) | opcionais | para depois, se quiser ir mais fundo |
 
 > ⚠️ **Ao validar uma fase que mexeu em C#:** `docker compose --profile obs up -d` reaproveita a
@@ -249,22 +249,22 @@ Se o Loki cair, a API continua respondendo. Se o Tempo cair, idem. Toda integra�
 
 A trilha está concluída quando **todos** estiverem marcados:
 
-- [ ] `docker compose --profile obs up -d` sobe a stack inteira
-- [ ] `docker compose up -d` continua subindo só `api` + `web` (nada quebrou)
+- [x] `docker compose --profile obs up -d` sobe a stack inteira
+- [x] `docker compose up -d` continua subindo só `api` + `web` (nada quebrou)
 - [x] Health checks respondendo em `/health`, `/health/live`, `/health/ready`
 - [x] Logs estruturados saindo da API
 - [x] Logs pesquisáveis no Grafana via Loki
 - [x] Métricas expostas pelo Collector e coletadas pelo Prometheus (target `UP`)
-- [ ] Métricas visíveis no Grafana
+- [x] Métricas visíveis no Grafana
 - [x] Traces chegando no Tempo
 - [x] Traces visíveis e navegáveis no Grafana
-- [ ] TraceId de um log abre o trace correspondente (e vice-versa)
+- [x] TraceId de um log abre o trace correspondente (e vice-versa)
 - [x] Dashboard `ASP.NET Core Observability` provisionado e sobrevivendo a `down`/`up`
 - [x] 3 alertas configurados e disparando de verdade
 - [x] Cenários de erro reproduzíveis por query string
 - [x] Cenários de latência reproduzíveis por query string
-- [ ] `docs/OBSERVABILIDADE.md` explicando o laboratório inteiro
-- [ ] Ambiente destruído com `down -v` e recriado do zero sem intervenção manual
+- [x] `docs/OBSERVABILIDADE.md` explicando o laboratório inteiro
+- [x] Ambiente destruído com `down -v` e recriado do zero sem intervenção manual
 
 ---
 
