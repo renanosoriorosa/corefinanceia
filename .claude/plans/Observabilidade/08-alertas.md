@@ -1,7 +1,7 @@
 # Fase 08 — Alertas no Grafana
 
 > ⬅️ anterior: [07 — Dashboard](07-dashboard-grafana.md) · ➡️ próxima: [09 — Testes e documentação](09-testes-e-documentacao.md)
-> **Containers novos:** nenhum.
+> **Containers novos:** nenhum. Três YAML de provisioning — e um endpoint no `DemoController` para o alerta virar log.
 
 ---
 
@@ -190,10 +190,115 @@ docker start sqlserver_container      # e volta para Normal sozinho
 
 ## Critério de aceite
 
-- [ ] Três regras provisionadas e visíveis em Alerting → Alert rules
-- [ ] High Error Rate dispara com `-Cenario erro` e a transição por `Pending` foi observada
-- [ ] High Latency dispara com `-Cenario lento`
-- [ ] Application Unhealthy dispara com o SQL Server parado
-- [ ] Todos voltam a `Normal` sozinhos quando a condição termina
-- [ ] Limiares centralizados e fáceis de alterar
-- [ ] Regras sobrevivem a `down` + `up`
+- [x] Três regras provisionadas e visíveis em Alerting → Alert rules
+- [x] High Error Rate dispara com `-Cenario erro` e a transição por `Pending` foi observada
+- [x] High Latency dispara com `-Cenario lento`
+- [x] Application Unhealthy dispara com o SQL Server parado
+- [x] Todos voltam a `Normal` sozinhos quando a condição termina
+- [x] Limiares centralizados e fáceis de alterar
+- [x] Regras sobrevivem a `down` + `up`
+
+---
+
+<a id="resultado-da-execucao"></a>
+
+## Resultado da execução (2026-09-16)
+
+### 1. O endpoint foi criado — e é a melhor parte da fase
+
+A "dica que fecha o ciclo" virou `POST /api/demo/alert-webhook` (`DemoController`) mais o DTO
+`AlertaWebhookRequest`, um recorte do payload do Grafana com o que realmente se usa: `status`,
+`labels`, `annotations` e `values`.
+
+Duas decisões que valem o comentário:
+
+- **`firing` loga em `Warning`, `resolved` loga em `Information`.** Como `level` é a única
+  propriedade promovida a label do Loki (fase 03), `{app="corefinance-api", level="warning"}`
+  passa a listar os alertas que dispararam sem precisar ler o texto da linha.
+- **O endpoint devolve 200 sempre.** Devolver erro faria o Grafana reenviar a notificação, e um
+  webhook que falha sozinho viraria tráfego de 5xx — alimentando o alerta de taxa de erro que
+  acabou de disparar. Alerta que causa alerta é um laço difícil de enxergar depois.
+
+O `values` do payload traz o valor de cada `refId` da regra. Como `B` é o `reduce`, o log diz
+**com quanto** disparou, não só que disparou:
+
+```text
+Alerta High Latency DISPAROU (warning) com valor 2.4247378788238074: P95 de latencia acima de 1s
+```
+
+### 2. O ciclo de vida inteiro, lido do Loki
+
+Esta é a prova de que o alerta virou sinal como qualquer outro:
+
+| Horário | Estado | Alerta | Valor | `level` |
+|---|---|---|---|---|
+| 20:20:43 | DISPAROU | High Error Rate | `1` (100 %) | `warning` |
+| 20:27:43 | RESOLVIDO | High Error Rate | — | `info` |
+| 20:32:16 | DISPAROU | High Latency | `2.42` s | `warning` |
+| 20:36:40 | DISPAROU | Application Unhealthy | `0` | `warning` |
+| 20:38:40 | RESOLVIDO | Application Unhealthy | — | `info` |
+| 20:39:16 | RESOLVIDO | High Latency | — | `info` |
+
+Cada uma dessas linhas tem `TraceId` preenchido — o POST do Grafana é uma requisição HTTP como
+outra qualquer e a fase 06 continua valendo para ela.
+
+### 3. Os cinco testes
+
+**Teste 1 — High Error Rate.** `-Cenario erro -Duracao 200`, com o estado lido a cada 15 s:
+
+```text
+20:19:28  inactive
+20:19:44  pending     ← limiar cruzado, `for` começou a contar
+20:20:45  firing      ← 1 min depois, como o `for: 1m` manda
+```
+
+A transição por `Pending` durou exatamente as **duas avaliações** que o `interval: 30s` do grupo
+permite dentro de 1 minuto. É a diferença entre "picozinho" e "problema", visível no relógio.
+
+**Teste 2 — High Latency.** `-Cenario lento -Delay 2000 -Duracao 240`: `pending` às 20:30:07,
+`firing` às 20:32:09 — os 2 minutos do `for`, também no relógio.
+
+> ⚠️ **Uma ressalva honesta ao enunciado do teste.** O plano diz para reparar que "a média
+> continua aceitável enquanto o P95 estoura". Com o cenário `lento` **puro** isso não acontece:
+> se toda requisição leva 2 s, média e P95 coincidem (medido: média 1.997 ms, P95 2.425 ms).
+> A divergência precisa de tráfego **misto** — e ela foi medida na [fase 07](07-dashboard-grafana.md#resultado-da-execucao):
+> média 276 ms contra P95 2.346 ms rodando `misto` e `lento` ao mesmo tempo. O alerta de latência
+> pega os dois casos; quem esconde a cauda é a média, não o P95.
+
+**Teste 3 — Application Unhealthy.** `docker stop sqlserver_container` às 20:34:40 → `pending` às
+20:35:41 → `firing` às 20:36:42. Cerca de 2 min, e não 1: entre a queda e o alerta existem quatro
+esperas empilhadas — o publisher de health (15 s), o export OTLP (15 s), o scrape do Prometheus
+(15 s) e só então o `for: 1m`. **Latência de detecção é a soma da cadeia inteira**, nunca só o
+`for`. Vale saber disso antes de prometer um SLA de detecção.
+
+**Teste 4 — resolução sozinha.** Nenhum alerta precisou de intervenção:
+
+| Alerta | Condição terminou | Voltou a Normal | Atraso |
+|---|---|---|---|
+| High Error Rate | 20:22:35 (carga parou) | 20:27:47 | ~5 min — a janela do `rate([5m])` esvaziando |
+| Application Unhealthy | 20:37:49 (`docker start`) | 20:38:36 | ~47 s |
+| High Latency | 20:33:40 (carga parou) | 20:38:51 | ~5 min — mesma janela |
+
+> 💡 **O `for` só vale na ida.** A volta é imediata: assim que a condição deixa de ser verdadeira,
+> o Grafana resolve sem esperar nada. Quem segurou os ~5 min dos dois primeiros não foi o alerta,
+> foi o `[5m]` da query — a métrica ainda enxergava o incidente. Janela de query é meia-vida de
+> alerta, e é por isso que `rate([1h])` em regra de alerta é uma armadilha.
+
+**Teste 5 — persistência.** `docker compose --profile obs down` + `up -d`: as três regras, o
+contact point `lab-local` e a policy voltaram provisionados, sem nenhum clique.
+
+### 4. Detalhes de provisioning que só aparecem fazendo
+
+> ⚠️ **A pasta `provisioning/alerting/` precisa existir antes do Grafana subir.** Se o diretório
+> não existe, o log solta `can't read alerting provisioning files from directory` e segue em
+> frente — sem regra nenhuma e sem falhar. Como o volume é `provisioning/` inteiro, criar a pasta
+> depois exige reiniciar o container.
+
+> ⚠️ **O contact point padrão não some.** Depois do provisioning, `/api/v1/provisioning/contact-points`
+> lista `email receiver` (o embutido) **e** `lab-local`. Quem decide o destino é a notification
+> policy, não a existência do contact point — e a policy provisionada, essa sim, substitui a
+> árvore inteira.
+
+> 💡 **`__dashboardUid__` e `__panelId__` não são anotações comuns.** São os dois campos que ligam
+> a regra ao painel: com eles, a notificação ganha o botão que abre exatamente o gráfico da faixa 1
+> que disparou. É o "próximo passo" saindo do texto e virando clique.

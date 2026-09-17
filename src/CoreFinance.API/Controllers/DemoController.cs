@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using CoreFinance.API.Observability;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -95,6 +96,44 @@ public class DemoController : ControllerBase
             rotulo, delayMs, errorRate);
 
         return Ok(new { cenario = "random", latencia = rotulo, delayMs, errorRate });
+    }
+
+    // Destino do contact point da fase 08. Nao existe para "receber notificacao": existe para
+    // o alerta virar LOG — e, no Loki, ele fica pesquisavel como qualquer outro sinal, com
+    // TraceId e tudo. E a observabilidade observando a si mesma, que e o fecho da trilha.
+    [HttpPost("alert-webhook")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult AlertaDoGrafana([FromBody] AlertaWebhookRequest requisicao)
+    {
+        foreach (var alerta in requisicao.Alerts)
+        {
+            var nome = alerta.Labels.GetValueOrDefault("alertname", "desconhecido");
+            var severidade = alerta.Labels.GetValueOrDefault("severity", "desconhecida");
+            var resumo = alerta.Annotations.GetValueOrDefault("summary", string.Empty);
+
+            // B e o refId do reduce em rules.yml — o numero que cruzou o limiar.
+            var valor = alerta.Values.GetValueOrDefault("B");
+
+            // Disparo em Warning, resolucao em Information: o nivel e a unica propriedade
+            // promovida a label do Loki (fase 03), entao `{app="corefinance-api", level="warning"}`
+            // passa a listar os alertas que dispararam sem precisar ler o texto da linha.
+            if (string.Equals(alerta.Status, "firing", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning(
+                    "Alerta {Alerta} DISPAROU ({Severidade}) com valor {Valor}: {Resumo}",
+                    nome, severidade, valor, resumo);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "Alerta {Alerta} RESOLVIDO ({Severidade}): {Resumo}",
+                    nome, severidade, resumo);
+            }
+        }
+
+        // 200 sempre: devolver erro faria o Grafana reenviar a notificacao, e um webhook que
+        // falha sozinho viraria trafego de erro — alimentando o proprio alerta de taxa de erro.
+        return Ok(new { cenario = "alert-webhook", recebidos = requisicao.Alerts.Count });
     }
 
     // Cauda de latencia proposital: a maioria rapida, algumas medianas, poucas lentas.

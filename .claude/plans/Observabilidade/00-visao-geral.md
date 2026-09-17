@@ -1,6 +1,6 @@
 # Trilha de Observabilidade do CoreFinance — Visão geral
 
-> **Status:** fases [01](01-health-checks.md), [02](02-endpoints-de-demonstracao.md), [03](03-logs-serilog-loki.md) e [04](04-metricas-otel-collector-prometheus.md) concluídas e validadas em 2026-09-05; fase [05](05-traces-tempo.md) em 2026-09-08 · fases 06-10 pendentes.
+> **Status:** fases [01](01-health-checks.md), [02](02-endpoints-de-demonstracao.md), [03](03-logs-serilog-loki.md) e [04](04-metricas-otel-collector-prometheus.md) concluídas e validadas em 2026-09-05; fase [05](05-traces-tempo.md) em 2026-09-08; fases [06](06-correlacao-traceid-logs-traces.md), [07](07-dashboard-grafana.md) e [08](08-alertas.md) em 2026-09-16 · fases 09-10 pendentes.
 > **Referência:** `observalibidade-dicas.md` (spec original, escrita para um projeto novo).
 > **Adaptação:** aplicar a spec ao CoreFinance que já existe, sem quebrar nada do que está no ar hoje.
 
@@ -260,7 +260,7 @@ A trilha está concluída quando **todos** estiverem marcados:
 - [x] Traces visíveis e navegáveis no Grafana
 - [ ] TraceId de um log abre o trace correspondente (e vice-versa)
 - [x] Dashboard `ASP.NET Core Observability` provisionado e sobrevivendo a `down`/`up`
-- [ ] 3 alertas configurados e disparando de verdade
+- [x] 3 alertas configurados e disparando de verdade
 - [x] Cenários de erro reproduzíveis por query string
 - [x] Cenários de latência reproduzíveis por query string
 - [ ] `docs/OBSERVABILIDADE.md` explicando o laboratório inteiro

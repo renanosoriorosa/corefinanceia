@@ -1,0 +1,214 @@
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+#  Limiares do laboratorio — mudar alerta e editar UMA linha aqui e reiniciar o Grafana
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+#   High Error Rate        > 0.05  (5%)        por 1 min    → evaluator do refId C
+#   High Latency (P95)     > 1     (segundo)   por 2 min    → evaluator do refId C
+#   Application Unhealthy  < 1     (saude)     por 1 min    → evaluator do refId C
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+#
+# Cada regra e sempre a mesma receita: query (A) -> reduce (B) -> threshold (C), e o campo
+# `condition` diz qual refId decide. O datasourceUid __expr__ nao e um datasource de verdade:
+# e o motor de expressoes do proprio Grafana.
+#
+# Alerta aqui e SINTOMA, nunca causa: "o usuario esta tomando erro", "o usuario esta esperando
+# demais", "a aplicacao nao esta saudavel". CPU alta com todo mundo atendido nao e incidente.
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: CoreFinance
+    folder: CoreFinance
+    # De quanto em quanto tempo cada regra do grupo e avaliada. Com `for: 1m`, o alerta passa
+    # por duas avaliacoes em Pending antes de virar Alerting.
+    interval: 30s
+    rules:
+
+      # ── 1. Taxa de erro ──────────────────────────────────────────────────────────────────
+      - uid: corefinance-high-error-rate
+        title: High Error Rate
+        condition: C
+        # O `for` e o que separa picozinho de problema: a condicao precisa ficar violada por um
+        # minuto inteiro. E o campo que mais evita alerta ruidoso.
+        for: 1m
+        # Sem trafego nao ha incidente — a taxa de erro simplesmente nao existe.
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: critical
+          sinal: erro
+        annotations:
+          summary: Mais de 5% das requisicoes estao retornando 5xx
+          description: >-
+            Taxa de erro em {{ humanizePercentage $values.B.Value }} nos ultimos 5 minutos.
+            Proximo passo: faixa 2 do dashboard para ver QUAL rota esta falhando, e no Tempo a
+            consulta TraceQL para ver uma requisicao real que quebrou.
+          runbook: "Dashboard http://localhost:3001/d/corefinance-obs | TraceQL no Tempo: { status = error }"
+          # Liga o alerta ao painel: a notificacao ganha o botao que abre exatamente este grafico.
+          __dashboardUid__: corefinance-obs
+          __panelId__: "2"
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: false
+              range: true
+              intervalMs: 15000
+              maxDataPoints: 43200
+              # clamp_min no denominador: sem ele, trafego zerado vira divisao por zero e a regra
+              # cai em NoData — o alerta parece quebrado. Divisao em PromQL sempre pede isto.
+              expr: >-
+                sum(rate(http_server_request_duration_seconds_count{service_name="corefinance-api",
+                http_route!~"/health.*", http_response_status_code=~"5.."}[5m]))
+                /
+                clamp_min(sum(rate(http_server_request_duration_seconds_count{service_name="corefinance-api",
+                http_route!~"/health.*"}[5m])), 0.001)
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.05]
+
+      # ── 2. Latencia ──────────────────────────────────────────────────────────────────────
+      - uid: corefinance-high-latency
+        title: High Latency
+        condition: C
+        # Mais folgado que o de erro, de proposito: um pico isolado de latencia nao e incidente,
+        # latencia sustentada e.
+        for: 2m
+        noDataState: OK
+        execErrState: Error
+        labels:
+          severity: warning
+          sinal: latencia
+        annotations:
+          summary: P95 de latencia acima de 1s
+          description: >-
+            P95 em {{ humanizeDuration $values.B.Value }} nos ultimos 5 minutos. A media pode
+            continuar aceitavel enquanto isto dispara — e exatamente o que o alerta existe para
+            pegar. Proximo passo: faixa 3 do dashboard, painel "P95 por rota".
+          runbook: "Dashboard http://localhost:3001/d/corefinance-obs | TraceQL no Tempo: { duration > 1s }"
+          __dashboardUid__: corefinance-obs
+          __panelId__: "3"
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: false
+              range: true
+              intervalMs: 15000
+              maxDataPoints: 43200
+              # by (le) e obrigatorio: histogram_quantile precisa da dimensao dos buckets.
+              expr: >-
+                histogram_quantile(0.95, sum by (le)
+                (rate(http_server_request_duration_seconds_bucket{service_name="corefinance-api",
+                http_route!~"/health.*"}[5m])))
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [1]
+
+      # ── 3. Saude ─────────────────────────────────────────────────────────────────────────
+      - uid: corefinance-application-unhealthy
+        title: Application Unhealthy
+        condition: C
+        for: 1m
+        # AQUI E O INVERSO das duas de cima: se a metrica de saude sumiu, ou a API morreu ou o
+        # Collector parou de coletar. Os dois merecem alerta — silencio nao e boa noticia.
+        noDataState: Alerting
+        execErrState: Alerting
+        labels:
+          severity: critical
+          sinal: saude
+        annotations:
+          summary: Health check da aplicacao abaixo de saudavel
+          description: >-
+            corefinance_health_status = {{ $values.B.Value }} (1 saudavel, 0.5 degradada, 0 fora).
+            Proximo passo: corefinance_health_check_status diz QUAL check caiu, e /health/ready
+            devolve o detalhe em JSON.
+          runbook: "Dashboard http://localhost:3001/d/corefinance-obs | curl http://localhost:5176/health/ready"
+          __dashboardUid__: corefinance-obs
+          __panelId__: "4"
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              refId: A
+              editorMode: code
+              instant: false
+              range: true
+              intervalMs: 15000
+              maxDataPoints: 43200
+              expr: corefinance_health_status{service_name="corefinance-api"}
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: reduce
+              reducer: last
+              expression: A
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: C
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    type: lt
+                    params: [1]

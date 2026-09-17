@@ -1,0 +1,21 @@
+# Para onde a notificacao vai. A spec dispensa Slack e e-mail, entao o destino e a propria
+# aplicacao: um POST no DemoController que apenas loga o alerta recebido.
+#
+# O efeito colateral e o objetivo pedagogico da fase: o alerta vira uma linha no Loki, com
+# TraceId, pesquisavel como qualquer outro log. A observabilidade passa a observar a si mesma.
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: lab-local
+    receivers:
+      - uid: lab-webhook
+        type: webhook
+        settings:
+          # Hostname do SERVICO do compose (api), nao do container (corefinance-api), e porta
+          # interna 8080 — a 5176 so existe no host.
+          url: http://api:8080/api/demo/alert-webhook
+          httpMethod: POST
+        # Sem isto, o Grafana so avisa quando o alerta dispara e voce nunca ve o "resolvido" —
+        # metade do ciclo de vida some do log.
+        disableResolveMessage: false

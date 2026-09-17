@@ -1,0 +1,16 @@
+# Como as notificacoes sao agrupadas antes de sair. Provisionar uma policy SUBSTITUI a arvore
+# padrao do Grafana: o que estiver aqui e a politica inteira, nao um acrescimo.
+apiVersion: 1
+
+policies:
+  - orgId: 1
+    receiver: lab-local
+    # Uma notificacao por regra. Agrupar por mais labels deixaria alertas distintos na mesma
+    # mensagem; agrupar por menos junta tudo num aviso so.
+    group_by: ['alertname']
+    # 10s porque num lab voce quer o retorno rapido. Em producao, 30s-1min: o group_wait existe
+    # para juntar o que dispara junto e evitar tempestade de notificacao.
+    group_wait: 10s
+    group_interval: 1m
+    # De quanto em quanto tempo o Grafana repete um alerta que continua disparado.
+    repeat_interval: 1h
